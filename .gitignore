@@ -1,0 +1,33 @@
+# Generated SSIS assessment output
+assessments/*
+!assessments/.gitkeep
+
+# Local configuration and secrets
+config.local.ps1
+*.local.ps1
+*.secret.ps1
+
+# SSIS/Visual Studio build and user-specific files
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# PowerShell and editor temporary files
+*.ps1~
+*.swp
+*.tmp
+*.temp
+
+# Logs
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor settings
+.vscode/
+.idea/
