@@ -2,7 +2,7 @@
 
 Scope: only SQL Agent jobs with `job_enabled = 1`. Mapping uses the SSIS `Execution ID` embedded in SQL Agent history messages, then joins to `04_ssis_executions.csv` and `DTSX_ANTIPATTERN_PACKAGE_FINDINGS.csv`. `TIME_OVERLAP_ONLY` candidates are excluded.
 
-Generated: 2026-09-07 14:07:13
+Generated: 2026-09-07 14:55:30
 Mapped active job-step/package groups: 165
 
 | Rank | Priority | Job | Step | Package | Executions | Avg min | Max min | Total hours | Failed | Anti-patterns |
@@ -10,7 +10,7 @@ Mapped active job-step/package groups: 165
 | 1 | P1 | SEQUENCE_TABLE_SIGAP | 1: Staging | Seq_Staging_SIGAP.dtsx | 1 | 105.6 | 105.6 | 1.8 | 0 | 8 |
 | 2 | P1 | LAPORAN KEUANGAN KEBUN (LKK) | 4: Fact | FACT_LKK.dtsx | 1 | 70.3 | 70.3 | 1.2 | 0 | 3044 |
 | 3 | P1 | INVESTOR RELATION | 5: Production Summary dan Areal Statement | PS_AS.dtsx | 1 | 67.4 | 67.4 | 1.1 | 1 | 890 |
-| 4 | P1 | AI Grading | 2: Fact | Fact.dtsx | 3 | 63.4 | 70 | 3.2 | 0 | 1 |
+| 4 | P1 | AI Grading | 2: Fact | Fact.dtsx | 3 | 63.4 | 70 | 3.2 | 0 | 0 |
 | 5 | P1 | Tax - Annually | 3: Annually Split | FACT_PPH_ANNUAL_SPLIT.dtsx | 2 | 37.8 | 38.5 | 1.3 | 0 | 28 |
 | 6 | P1 | Internal Audit | 1: Internal Audit | FACT_INTERNAL_AUDIT.dtsx | 2 | 36.8 | 37.1 | 1.2 | 0 | 109 |
 | 7 | P1 | LAPORAN KEUANGAN KEBUN (LKK) | 10: Fact Plasma Gapoktan | Fact.dtsx | 2 | 34.5 | 35.4 | 1.2 | 0 | 1495 |

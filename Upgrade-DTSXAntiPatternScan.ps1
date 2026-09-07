@@ -16,6 +16,15 @@ function Count-ActiveCrossJoin([string]$text) {
     return $n
 }
 
+function Count-CommitRisk([string]$text) {
+    $n = 0
+    foreach ($m in [regex]::Matches($text, 'name="FastLoadMaxInsertCommitSize">\s*(\d+)\s*</property>', [Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+        $value = [int64]$m.Groups[1].Value
+        if ($value -gt 0 -and $value -lt 100000 -and $value -ne 2147483647) { $n++ }
+    }
+    return $n
+}
+
 $old = @{}
 if (Test-Path $outCsv) {
     foreach ($row in (Import-Csv $outCsv)) { $old[$row.PackageFile] = $row }
@@ -44,7 +53,7 @@ $rows = foreach ($file in (Get-ChildItem $root -Recurse -File -Filter '*.dtsx'))
     $row['ADO.NET_or_ODBC_Provider'] = Count-Match $text '(?:CreationName="ADO\.NET|CreationName="ODBC|ADO\.NET|ODBC)'
     $row['ExplicitBufferOrThreadSetting'] = Count-Match $text '(?:DefaultBufferMaxRows|DefaultBufferSize|AutoAdjustBufferSize|EngineThreads|MaxConcurrentExecutables)'
     $row['TempStoragePathSetting'] = Count-Match $text '(?:BLOBTempStoragePath|BufferTempStoragePath)'
-    $row['DestinationCommitSizeSetting'] = Count-Match $text '(?:MaximumInsertCommitSize|CommitSize)'
+    $row['DestinationCommitSizeSetting'] = Count-CommitRisk $text
     $row['ExecutePackageTask'] = Count-Match $text 'Microsoft\.ExecutePackageTask'
     $row['CheckpointSetting'] = Count-Match $text '(?:SaveCheckpoints|CheckpointUsage)'
     $row['FullReloadIndicator'] = Count-Match $text '(?:TRUNCATE\s+TABLE|DELETE\s+FROM|INSERT\s+INTO)'

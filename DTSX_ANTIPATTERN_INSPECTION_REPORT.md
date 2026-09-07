@@ -35,3 +35,7 @@ Scope: 781 extracted DTSX files under ssessments/EVSET-001/01_static_packages/e
 - Index/statistics health, execution plans, filter pushdown effectiveness, tempdb, waits, I/O, CPU/RAM, antivirus exclusions, SSIS logging level, destination indexes/constraints/triggers, and actual buffer spooling cannot be proven from DTSX alone.
 - Query Store remains unavailable because it is OFF in the captured database state. Use targeted active-request/wait snapshots for selected active jobs.
 - Static findings are candidates and must be correlated with package/job duration before assigning P0/P1.
+
+## Column definitions
+
+Detailed explanations for every findings column are available in [DTSX_ANTIPATTERN_COLUMN_GLOSSARY.md](DTSX_ANTIPATTERN_COLUMN_GLOSSARY.md).
