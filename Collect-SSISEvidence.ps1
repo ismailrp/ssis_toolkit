@@ -28,6 +28,7 @@ if ($StaticOnly) {
 }
 if (!$Config.ContainsKey("CollectAdditionalEvidence")) { $Config.CollectAdditionalEvidence = $false }
 if (!$Config.ContainsKey("AdditionalEvidenceDatabases")) { $Config.AdditionalEvidenceDatabases = @() }
+if (!$Config.ContainsKey("AutoDiscoverOnlineUserDatabases")) { $Config.AutoDiscoverOnlineUserDatabases = $true }
 if ($AdditionalEvidence) { $Config.CollectAdditionalEvidence = $true }
 
 function Convert-WindowTime {
@@ -173,7 +174,39 @@ $env = New-Object PSObject -Property @{
     CollectAdditionalEvidence = $Config.CollectAdditionalEvidence
     AdditionalEvidenceDatabases = (@($Config.AdditionalEvidenceDatabases) -join ";")
 }
+
+function Get-OnlineUserDatabases {
+    try {
+        $rows = Invoke-SqlQuery -Database "master" -Query @"
+SELECT name AS database_name, is_query_store_on
+FROM sys.databases
+WHERE database_id > 4
+  AND state_desc = 'ONLINE'
+ORDER BY name;
+"@ -Timeout $Config.SqlCommandTimeoutSeconds
+        $result = @()
+        foreach ($row in @($rows.Rows)) {
+            $result += New-Object PSObject -Property @{
+                DatabaseName = [string]$row.database_name
+                QueryStoreOn = [bool]$row.is_query_store_on
+            }
+        }
+        return $result
+    }
+    catch {
+        Write-Log "WARN" "FAILED :: online user database discovery :: $($_.Exception.Message)"
+        return @()
+    }
+}
 $env | Export-Csv (Join-Path $manifestDir "collector_environment.csv") -NoTypeInformation -Encoding UTF8
+
+$discoveredUserDatabases = @()
+if ($Config.AutoDiscoverOnlineUserDatabases -and
+    (($Config.CollectAdditionalEvidence -and $Config.CollectRuntime) -or
+     ($Config.CollectQueryStore -and @($Config.QueryStoreDatabases).Count -eq 0))) {
+    $discoveredUserDatabases = @(Get-OnlineUserDatabases)
+    Write-Log "INFO" ("Discovered online user databases: " + (@($discoveredUserDatabases | ForEach-Object { $_.DatabaseName }) -join ", "))
+}
 
 # ------------------------------------------------------------
 # Static evidence from exported ISPAC files
@@ -748,8 +781,12 @@ SELECT name AS database_name, state_desc, is_read_only, recovery_model_desc,
 FROM sys.databases WHERE state_desc='ONLINE' ORDER BY name;
 "@
 
-    if (@($Config.AdditionalEvidenceDatabases).Count -gt 0) {
-        foreach ($db in @($Config.AdditionalEvidenceDatabases)) {
+    $additionalDatabases = @($Config.AdditionalEvidenceDatabases)
+    if ($additionalDatabases.Count -eq 0 -and $Config.AutoDiscoverOnlineUserDatabases) {
+        $additionalDatabases = @($discoveredUserDatabases | ForEach-Object { $_.DatabaseName })
+    }
+    if ($additionalDatabases.Count -gt 0) {
+        foreach ($db in $additionalDatabases) {
             $safeDb = ($db -replace '[^A-Za-z0-9_.-]','_')
             Collect-Query ("06_wrapper_references_" + $safeDb) "06_additional_evidence\wrapper_references" $db @"
 SELECT DB_NAME() AS database_name, SCHEMA_NAME(o.schema_id) AS schema_name,
@@ -764,7 +801,7 @@ ORDER BY schema_name, object_name;
         }
     }
     else {
-        Write-Log "INFO" "Wrapper reference collection skipped: AdditionalEvidenceDatabases is empty."
+        Write-Log "INFO" "Wrapper reference collection skipped: no online user databases discovered."
     }
 }
 elseif ($Config.CollectAdditionalEvidence -and !$Config.CollectRuntime) {
@@ -777,8 +814,12 @@ else {
 # ------------------------------------------------------------
 # Optional Query Store evidence
 # ------------------------------------------------------------
-if ($Config.CollectQueryStore -and $Config.QueryStoreDatabases -and @($Config.QueryStoreDatabases).Count -gt 0) {
-    foreach ($db in @($Config.QueryStoreDatabases)) {
+if ($Config.CollectQueryStore) {
+    $queryStoreDatabases = @($Config.QueryStoreDatabases)
+    if ($queryStoreDatabases.Count -eq 0 -and $Config.AutoDiscoverOnlineUserDatabases) {
+        $queryStoreDatabases = @($discoveredUserDatabases | Where-Object { $_.QueryStoreOn } | ForEach-Object { $_.DatabaseName })
+    }
+    foreach ($db in $queryStoreDatabases) {
         $safe = ($db -replace '[^A-Za-z0-9_.-]','_')
 
         Collect-Query ("querystore_top_duration_" + $safe) "05_sqlserver_optional" $db @"
@@ -809,6 +850,9 @@ JOIN sys.query_store_runtime_stats rs ON p.plan_id=rs.plan_id
 GROUP BY q.query_id,qt.query_sql_text
 ORDER BY weighted_avg_logical_reads DESC;
 "@
+    }
+    if ($queryStoreDatabases.Count -eq 0) {
+        Write-Log "INFO" "Query Store collection skipped: no databases configured or discovered with Query Store enabled."
     }
 }
 else {

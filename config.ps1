@@ -41,6 +41,7 @@ $Config = @{
     # Collects SQL Agent mapping, Query Store state, and wrapper references.
     CollectAdditionalEvidence = $false
     AdditionalEvidenceDatabases = @()
+    AutoDiscoverOnlineUserDatabases = $true
 
     # Optional Query Store evidence. Keep disabled for first-pass assessment.
     CollectQueryStore = $false

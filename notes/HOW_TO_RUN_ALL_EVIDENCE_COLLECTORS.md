@@ -95,7 +95,13 @@ powershell -ExecutionPolicy Bypass -File .\New-SSISAssessment.ps1 `
   -AssessmentId EVSET-90D-ADDITIONAL
 ```
 
-Untuk mencari wrapper procedure, isi daftar database di `config.ps1`:
+Database untuk query per database tidak wajib diisi manual. Dengan konfigurasi
+default, collector menemukan otomatis seluruh database user yang online
+(`database_id > 4`). Untuk Query Store, hanya database yang `is_query_store_on = 1`
+yang diproses. Untuk wrapper references, seluruh database user online diproses.
+
+Jika ingin membatasi scope, isi daftar database di `config.ps1`; daftar manual
+akan menjadi override:
 
 ```powershell
 AdditionalEvidenceDatabases = @(
@@ -104,8 +110,8 @@ AdditionalEvidenceDatabases = @(
 )
 ```
 
-Jika daftar tersebut kosong, wrapper collection dilewati. Query Store ranking
-adalah mode berbeda dan tetap dikontrol oleh `CollectQueryStore` serta
+Jika daftar tersebut kosong, auto-discovery digunakan. Query Store ranking tidak
+mengulang output core dan tetap dikontrol oleh `CollectQueryStore` serta
 `QueryStoreDatabases`; jangan mengaktifkannya hanya karena best practice tanpa
 scope database dan kebutuhan evidence yang jelas.
 

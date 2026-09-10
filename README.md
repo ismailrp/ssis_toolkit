@@ -104,9 +104,11 @@ Evidence tambahan bersifat opsional dan tidak mengulang output core collector:
 .New-SSISAssessment.ps1 -LookbackDays 90 -MaxExecutions 0 -AdditionalEvidence
 ```
 
-Mode ini menghasilkan SQL Agent mapping dan Query Store database state. Wrapper
-references hanya dikumpulkan bila `AdditionalEvidenceDatabases` di `config.ps1`
-diisi. Query Store ranking tetap memakai modul Query Store existing; component,
+Mode ini menghasilkan SQL Agent mapping dan Query Store database state. Jika list
+database kosong, database user yang online ditemukan otomatis; Query Store ranking
+hanya dijalankan pada database yang Query Store-nya aktif. List manual tetap dapat
+dipakai sebagai override. Wrapper references juga memakai discovery yang sama.
+Query Store ranking tetap memakai modul Query Store existing; component,
 execution, message, dan inventory evidence juga tidak diduplikasi.
 
 ## PowerShell 4.0 compatibility
