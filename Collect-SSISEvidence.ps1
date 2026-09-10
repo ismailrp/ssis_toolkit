@@ -1,13 +1,48 @@
 # PATCH-ID: NETZIP-NOREGRESSION-20260902-v1.1.7
 param(
     [Parameter(Mandatory=$true)][string]$ConfigPath,
-    [Parameter(Mandatory=$true)][string]$OutputPath
+    [Parameter(Mandatory=$true)][string]$OutputPath,
+    [int]$LookbackDays = -1,
+    [int]$MaxExecutions = -1,
+    [string]$StartTime = "",
+    [string]$EndTime = "",
+    [switch]$AdditionalEvidence,
+    [switch]$StaticOnly
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
 . $ConfigPath
+
+if ($LookbackDays -eq 0 -or $LookbackDays -lt -1 -or $MaxExecutions -lt -1) {
+    throw "LookbackDays must be -1 or positive; MaxExecutions must be -1, 0, or positive."
+}
+if ($LookbackDays -gt 0) { $Config.LookbackDays = $LookbackDays }
+if ($MaxExecutions -ge 0) { $Config.MaxExecutions = $MaxExecutions }
+if ($StaticOnly) {
+    $Config.CollectStatic = $true
+    $Config.CollectRuntime = $false
+    $Config.CollectMessages = $false
+    $Config.CollectQueryStore = $false
+}
+if (!$Config.ContainsKey("CollectAdditionalEvidence")) { $Config.CollectAdditionalEvidence = $false }
+if (!$Config.ContainsKey("AdditionalEvidenceDatabases")) { $Config.AdditionalEvidenceDatabases = @() }
+if ($AdditionalEvidence) { $Config.CollectAdditionalEvidence = $true }
+
+function Convert-WindowTime {
+    param([string]$Value, [string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    $parsed = [datetime]::MinValue
+    if (![datetime]::TryParse($Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeLocal, [ref]$parsed)) {
+        throw "$Name is not a valid datetime: $Value"
+    }
+    return $parsed
+}
+
+$windowStart = Convert-WindowTime $StartTime "StartTime"
+$windowEnd = Convert-WindowTime $EndTime "EndTime"
+if ($windowStart -and $windowEnd -and $windowStart -ge $windowEnd) { throw "StartTime must be earlier than EndTime." }
 
 $logPath = Join-Path $OutputPath "collector.log"
 
@@ -128,11 +163,15 @@ $env = New-Object PSObject -Property @{
     ServerInstance = $Config.ServerInstance
     LookbackDays = $Config.LookbackDays
     MaxExecutions = $Config.MaxExecutions
+    ExplicitStartTime = $StartTime
+    ExplicitEndTime = $EndTime
     CollectStatic = $Config.CollectStatic
     CollectRuntime = $Config.CollectRuntime
     IspacRoot = $Config.IspacRoot
     CollectMessages = $Config.CollectMessages
     CollectQueryStore = $Config.CollectQueryStore
+    CollectAdditionalEvidence = $Config.CollectAdditionalEvidence
+    AdditionalEvidenceDatabases = (@($Config.AdditionalEvidenceDatabases) -join ";")
 }
 $env | Export-Csv (Join-Path $manifestDir "collector_environment.csv") -NoTypeInformation -Encoding UTF8
 
@@ -371,6 +410,7 @@ if ($Config.CollectRuntime) {
     $packageFilter = Build-InFilter "package_name" $Config.PackageNames
     $lookback = [int]$Config.LookbackDays
     $maxExec = [int]$Config.MaxExecutions
+    $executionTop = if ($maxExec -gt 0) { "TOP ($maxExec)" } else { "" }
 
     # ------------------------------------------------------------
     # Connectivity
@@ -442,10 +482,18 @@ if ($Config.CollectRuntime) {
     # ------------------------------------------------------------
     # Core runtime executions
     # ------------------------------------------------------------
-    $executionWhere = "WHERE start_time >= DATEADD(day,-$lookback,GETDATE()) $folderFilter $projectFilter $packageFilter"
+    if ($windowStart -or $windowEnd) {
+        $windowPredicates = @()
+        if ($windowStart) { $windowPredicates += "start_time >= CONVERT(datetime, '" + $windowStart.ToString("yyyy-MM-ddTHH:mm:ss") + "', 126)" }
+        if ($windowEnd) { $windowPredicates += "start_time < CONVERT(datetime, '" + $windowEnd.ToString("yyyy-MM-ddTHH:mm:ss") + "', 126)" }
+        $executionWhere = "WHERE " + ($windowPredicates -join " AND ") + " $folderFilter $projectFilter $packageFilter"
+    }
+    else {
+        $executionWhere = "WHERE start_time >= DATEADD(day,-$lookback,GETDATE()) $folderFilter $projectFilter $packageFilter"
+    }
 
     Collect-Query "executions" "03_runtime" "SSISDB" @"
-    SELECT TOP ($maxExec)
+    SELECT $executionTop
            execution_id, folder_name, project_name, package_name,
            environment_name, executed_as_name,
            use32bitruntime, reference_id,
@@ -464,7 +512,7 @@ if ($Config.CollectRuntime) {
 "@
 
     $execScope = @"
-    SELECT TOP ($maxExec) execution_id
+    SELECT $executionTop execution_id
     FROM catalog.executions
     $executionWhere
     ORDER BY execution_id DESC
@@ -571,6 +619,159 @@ if ($Config.CollectRuntime) {
 }
 else {
     Write-Log "INFO" "SSISDB runtime collection disabled."
+}
+
+# ------------------------------------------------------------
+# Optional additional evidence (only non-overlapping outputs)
+# ------------------------------------------------------------
+if ($Config.CollectAdditionalEvidence -and $Config.CollectRuntime) {
+    $additionalDir = Join-Path $OutputPath "06_additional_evidence"
+    $agentDir = Join-Path $additionalDir "sql_agent"
+    $wrapperDir = Join-Path $additionalDir "wrapper_references"
+    New-Item -ItemType Directory -Path $agentDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
+
+    $additionalWhere = @()
+    if ($windowStart) { $additionalWhere += "e.start_time >= CONVERT(datetime, '" + $windowStart.ToString("yyyy-MM-ddTHH:mm:ss") + "', 126)" }
+    if ($windowEnd) { $additionalWhere += "e.start_time < CONVERT(datetime, '" + $windowEnd.ToString("yyyy-MM-ddTHH:mm:ss") + "', 126)" }
+    if (!$windowStart -and !$windowEnd) { $additionalWhere += "e.start_time >= DATEADD(day,-$([int]$Config.LookbackDays),GETDATE())" }
+    foreach ($additionalFilter in @(
+        (Build-InFilter "e.folder_name" $Config.FolderNames),
+        (Build-InFilter "e.project_name" $Config.ProjectNames),
+        (Build-InFilter "e.package_name" $Config.PackageNames)
+    )) {
+        if ($additionalFilter) { $additionalWhere += $additionalFilter.Substring(5) }
+    }
+    $additionalWhere = @($additionalWhere | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $additionalWhereSql = ($additionalWhere -join " AND ")
+
+    $commandRedacted = "CAST(REPLACE(REPLACE(REPLACE(REPLACE(js.command, 'Password=', 'Password=[REDACTED]'), 'password=', 'password=[REDACTED]'), 'Pwd=', 'Pwd=[REDACTED]'), 'pwd=', 'pwd=[REDACTED]') AS nvarchar(max))"
+    $definitionRedacted = "CAST(REPLACE(REPLACE(REPLACE(REPLACE(m.definition, 'Password=', 'Password=[REDACTED]'), 'password=', 'password=[REDACTED]'), 'Pwd=', 'Pwd=[REDACTED]'), 'pwd=', 'pwd=[REDACTED]') AS nvarchar(max))"
+
+    # These A-section outputs are also the source for candidate mapping.
+    Collect-Query "01_sql_agent_job_steps" "06_additional_evidence\sql_agent" "msdb" @"
+SELECT j.job_id, j.name AS job_name, j.enabled AS job_enabled,
+       js.step_id, js.step_name, js.subsystem, js.database_name,
+       $commandRedacted AS command_redacted,
+       js.on_success_action, js.on_fail_action, js.retry_attempts,
+       js.retry_interval, js.last_run_outcome
+FROM dbo.sysjobs AS j
+INNER JOIN dbo.sysjobsteps AS js ON js.job_id=j.job_id
+ORDER BY j.name, js.step_id;
+"@
+
+    Collect-Query "02_sql_agent_job_history" "06_additional_evidence\sql_agent" "msdb" @"
+;WITH H AS
+(
+    SELECT j.job_id, j.name AS job_name, h.instance_id, h.step_id,
+           js.step_name, js.subsystem, $commandRedacted AS command_redacted,
+           h.run_status,
+           CASE h.run_status WHEN 0 THEN 'Failed' WHEN 1 THEN 'Succeeded'
+                WHEN 2 THEN 'Retry' WHEN 3 THEN 'Canceled'
+                WHEN 4 THEN 'In Progress' ELSE 'Unknown' END AS run_status_desc,
+           h.run_date, h.run_time, h.run_duration, ca.step_start_time,
+           DATEADD(SECOND, (h.run_duration / 10000) * 3600
+             + ((h.run_duration % 10000) / 100) * 60
+             + (h.run_duration % 100), ca.step_start_time) AS step_end_time,
+           h.message
+    FROM dbo.sysjobhistory AS h
+    INNER JOIN dbo.sysjobs AS j ON j.job_id=h.job_id
+    LEFT JOIN dbo.sysjobsteps AS js ON js.job_id=h.job_id AND js.step_id=h.step_id
+    CROSS APPLY (SELECT DATETIMEFROMPARTS(h.run_date / 10000,
+        (h.run_date % 10000) / 100, h.run_date % 100,
+        h.run_time / 10000, (h.run_time % 10000) / 100,
+        h.run_time % 100, 0) AS step_start_time) AS ca
+    WHERE h.run_date >= 19000101
+)
+SELECT * FROM H
+WHERE step_start_time < CONVERT(datetime, '" + $(if ($windowEnd) { $windowEnd.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss") }) + "', 126)
+  AND step_end_time >= CONVERT(datetime, '" + $(if ($windowStart) { $windowStart.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).AddDays(-[int]$Config.LookbackDays).ToString("yyyy-MM-ddTHH:mm:ss") }) + "', 126)
+ORDER BY step_start_time, job_name, step_id;
+"@
+
+    Collect-Query "03_sql_agent_job_schedules" "06_additional_evidence\sql_agent" "msdb" @"
+SELECT j.job_id, j.name AS job_name, j.enabled AS job_enabled,
+       s.schedule_id, s.name AS schedule_name, s.enabled AS schedule_enabled,
+       s.freq_type, s.freq_interval, s.freq_subday_type, s.freq_subday_interval,
+       s.freq_relative_interval, s.freq_recurrence_factor,
+       s.active_start_date, s.active_start_time, s.active_end_date,
+       s.active_end_time, js.next_run_date, js.next_run_time
+FROM dbo.sysjobs AS j
+LEFT JOIN dbo.sysjobschedules AS js ON js.job_id=j.job_id
+LEFT JOIN dbo.sysschedules AS s ON s.schedule_id=js.schedule_id
+ORDER BY j.name, s.name;
+"@
+
+    Collect-Query "04_candidate_job_package_mapping" "06_additional_evidence\sql_agent" "SSISDB" @"
+;WITH JH AS
+(
+    SELECT j.job_id, j.name AS job_name, h.instance_id, h.step_id,
+           js.step_name, js.subsystem, $commandRedacted AS command_redacted,
+           h.run_status,
+           CASE h.run_status WHEN 0 THEN 'Failed' WHEN 1 THEN 'Succeeded'
+                WHEN 2 THEN 'Retry' WHEN 3 THEN 'Canceled'
+                WHEN 4 THEN 'In Progress' ELSE 'Unknown' END AS run_status_desc,
+           ca.start_time,
+           DATEADD(SECOND, (h.run_duration / 10000) * 3600
+             + ((h.run_duration % 10000) / 100) * 60
+             + (h.run_duration % 100), ca.start_time) AS end_time
+    FROM msdb.dbo.sysjobhistory AS h
+    INNER JOIN msdb.dbo.sysjobs AS j ON j.job_id=h.job_id
+    INNER JOIN msdb.dbo.sysjobsteps AS js ON js.job_id=h.job_id AND js.step_id=h.step_id
+    CROSS APPLY (SELECT DATETIMEFROMPARTS(h.run_date / 10000,
+        (h.run_date % 10000) / 100, h.run_date % 100,
+        h.run_time / 10000, (h.run_time % 10000) / 100,
+        h.run_time % 100, 0) AS start_time) AS ca
+    WHERE h.step_id > 0 AND h.run_date >= 19000101
+)
+SELECT e.execution_id, e.folder_name, e.project_name, e.package_name,
+       e.start_time AS ssis_start_time, e.end_time AS ssis_end_time,
+       e.status AS ssis_status, jh.job_id, jh.job_name, jh.step_id,
+       jh.step_name, jh.subsystem, jh.start_time AS agent_step_start_time,
+       jh.end_time AS agent_step_end_time, jh.run_status,
+       jh.run_status_desc, jh.instance_id, jh.command_redacted,
+       CASE WHEN LOWER(jh.command_redacted) LIKE '%' + LOWER(e.package_name) + '%'
+              OR LOWER(jh.step_name)=LOWER(REPLACE(e.package_name,'.dtsx',''))
+            THEN 'STRONG_NAME_OR_COMMAND_MATCH' ELSE 'TIME_OVERLAP_ONLY' END AS candidate_match_type
+FROM catalog.executions AS e
+INNER JOIN JH AS jh ON jh.start_time <= e.start_time AND jh.end_time >= e.end_time
+WHERE $additionalWhereSql
+ORDER BY e.start_time, e.execution_id, candidate_match_type DESC, jh.job_name, jh.step_id;
+"@
+
+    # D01 is not collected by the core collector. D02/D03 are intentionally
+    # omitted because the core Query Store module already collects equivalent
+    # per-database ranking evidence when enabled.
+    Collect-Query "05_query_store_database_state" "06_additional_evidence" "master" @"
+SELECT name AS database_name, state_desc, is_read_only, recovery_model_desc,
+       compatibility_level, is_query_store_on
+FROM sys.databases WHERE state_desc='ONLINE' ORDER BY name;
+"@
+
+    if (@($Config.AdditionalEvidenceDatabases).Count -gt 0) {
+        foreach ($db in @($Config.AdditionalEvidenceDatabases)) {
+            $safeDb = ($db -replace '[^A-Za-z0-9_.-]','_')
+            Collect-Query ("06_wrapper_references_" + $safeDb) "06_additional_evidence\wrapper_references" $db @"
+SELECT DB_NAME() AS database_name, SCHEMA_NAME(o.schema_id) AS schema_name,
+       o.name AS object_name, o.type_desc, $definitionRedacted AS definition_redacted
+FROM sys.objects AS o
+INNER JOIN sys.sql_modules AS m ON m.object_id=o.object_id
+WHERE m.definition LIKE '%SSISDB%'
+   OR m.definition LIKE '%catalog.create_execution%'
+   OR m.definition LIKE '%dtexec%'
+ORDER BY schema_name, object_name;
+"@
+        }
+    }
+    else {
+        Write-Log "INFO" "Wrapper reference collection skipped: AdditionalEvidenceDatabases is empty."
+    }
+}
+elseif ($Config.CollectAdditionalEvidence -and !$Config.CollectRuntime) {
+    Write-Log "INFO" "Additional evidence skipped because runtime collection is disabled."
+}
+else {
+    Write-Log "INFO" "Additional evidence collection disabled."
 }
 
 # ------------------------------------------------------------

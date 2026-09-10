@@ -24,6 +24,7 @@ $Config = @{
     CollectRuntime = $true
 
     # Runtime collection scope
+    # Can be overridden on New-SSISAssessment.ps1. MaxExecutions=0 means unlimited.
     LookbackDays  = 14
     MaxExecutions = 500
 
@@ -35,6 +36,11 @@ $Config = @{
     # Runtime message collection can become large.
     CollectMessages = $true
     MessageSeverityThreshold = 70
+
+    # Optional evidence not already covered by the core collector.
+    # Collects SQL Agent mapping, Query Store state, and wrapper references.
+    CollectAdditionalEvidence = $false
+    AdditionalEvidenceDatabases = @()
 
     # Optional Query Store evidence. Keep disabled for first-pass assessment.
     CollectQueryStore = $false

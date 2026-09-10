@@ -42,6 +42,18 @@ Optional explicit ID:
 
     powershell -ExecutionPolicy Bypass -File .\New-SSISAssessment.ps1 -AssessmentId EVSET-001
 
+Untuk window runtime yang lebih luas, gunakan override pada entry point yang sama.
+`-MaxExecutions 0` berarti tidak membatasi jumlah execution; tanpa parameter ini,
+nilai `MaxExecutions` dari `config.ps1` tetap berlaku.
+
+```powershell
+# 90 hari terakhir, tanpa cap execution
+powershell -ExecutionPolicy Bypass -File .\New-SSISAssessment.ps1 -LookbackDays 90 -MaxExecutions 0 -AssessmentId EVSET-090D
+
+# Window absolut; EndTime bersifat eksklusif
+powershell -ExecutionPolicy Bypass -File .\New-SSISAssessment.ps1 -StartTime "2026-01-01 00:00:00" -EndTime "2026-04-01 00:00:00" -MaxExecutions 0 -AssessmentId EVSET-Q1
+```
+
 ## Output
 
     assessments\EVSET-...\
@@ -82,7 +94,20 @@ No ISPAC is required.
     CollectStatic  = $true
     CollectRuntime = $false
 
-You can also run `Collect-StaticOnly.ps1` as a compatibility shortcut.
+`New-SSISAssessment.ps1` adalah entry point tunggal untuk runtime dan static-only.
+`Collect-StaticOnly.ps1` tetap tersedia sebagai compatibility shortcut. Collector
+inti `Collect-SSISEvidence.ps1` tetap terpisah dan dapat dipanggil oleh entry point.
+
+Evidence tambahan bersifat opsional dan tidak mengulang output core collector:
+
+```powershell
+.New-SSISAssessment.ps1 -LookbackDays 90 -MaxExecutions 0 -AdditionalEvidence
+```
+
+Mode ini menghasilkan SQL Agent mapping dan Query Store database state. Wrapper
+references hanya dikumpulkan bila `AdditionalEvidenceDatabases` di `config.ps1`
+diisi. Query Store ranking tetap memakai modul Query Store existing; component,
+execution, message, dan inventory evidence juga tidak diduplikasi.
 
 ## PowerShell 4.0 compatibility
 
