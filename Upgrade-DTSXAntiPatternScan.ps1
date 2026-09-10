@@ -7,79 +7,50 @@ param(
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
-$repo = (Get-Location).Path
-$assessment = (Resolve-Path -LiteralPath $AssessmentPath).Path
-$extractRoot = Join-Path $assessment '01_static_packages\extracted'
-if (!(Test-Path -LiteralPath $extractRoot)) { throw "Extracted DTSX path not found: $extractRoot" }
-if (!(Test-Path -LiteralPath $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null }
-$suffix = if ([string]::IsNullOrWhiteSpace($ReportSuffix)) { '' } else { '_' + $ReportSuffix }
-$outCsv = Join-Path $OutputPath ('DTSX_ANTIPATTERN_PACKAGE_FINDINGS' + $suffix + '.csv')
-$outMd = Join-Path $OutputPath ('DTSX_ANTIPATTERN_INSPECTION_REPORT' + $suffix + '.md')
-$summaryPath = Join-Path $assessment '01_static_packages\package_static_summary.csv'
-function Count-Match([string]$text, [string]$pattern) { return ([regex]::Matches($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count }
-function Count-Token([string]$text, [string]$token) {
-    $source = $text; $needle = $token; $n = 0; $at = 0
-    while (($at = $source.IndexOf($needle, $at, [StringComparison]::Ordinal)) -ge 0) { $n++; $at += $needle.Length }
-    return $n
-}
-function Count-AnyToken([string]$text, [string[]]$tokens) { $n=0; foreach($token in $tokens){$n += Count-Token $text $token}; return $n }
-function Count-ActiveCrossJoin([string]$text) { $n=0; foreach($line in ($text -split "`r?`n")){if($line -notmatch '^\s*--' -and $line -match '\bCROSS\s+JOIN\b'){$n++}}; return $n }
-function Count-CommitRisk([string]$text) { $n=0; foreach($m in [regex]::Matches($text,'name="FastLoadMaxInsertCommitSize">\s*(\d+)\s*</property>',[Text.RegularExpressions.RegexOptions]::IgnoreCase)){ $v=[int64]$m.Groups[1].Value; if($v -gt 0 -and $v -lt 100000 -and $v -ne 2147483647){$n++}}; return $n }
-function Get-Value([object]$row,[string]$name) { if($row -and $row.PSObject.Properties[$name]){if([string]$row.$name -eq 'True'){return 1};if([string]$row.$name -eq 'False'){return 0};return [int]$row.$name};return 0 }
-function Get-ComponentFindings([string]$path,[object]$summary) {
-    $items=New-Object System.Collections.Generic.List[string]
-    if(!(Test-Path -LiteralPath $path)){return ''}
-    try { [xml]$xml=Get-Content -Raw -LiteralPath $path } catch { return '' }
-    foreach($component in $xml.SelectNodes("//*[local-name()='component']")) {
-        $name=[string]$component.GetAttribute('name'); $class=[string]$component.GetAttribute('componentClassID')
-        if([string]::IsNullOrWhiteSpace($name)){continue}
-        $rule=''
-        if((Get-Value $summary 'HasSortIndicator') -eq 1 -and $class -match '(?i)Sort'){$rule='Sort'}
-        elseif((Get-Value $summary 'HasAggregateIndicator') -eq 1 -and $class -match '(?i)Aggregate'){$rule='Aggregate'}
-        elseif((Get-Value $summary 'HasMergeIndicator') -eq 1 -and $class -match '(?i)MergeJoin'){$rule='MergeJoinComponent'}
-        elseif((Get-Value $summary 'HasLookupIndicator') -eq 1 -and $class -match '(?i)Lookup'){$rule='FuzzyLookup'}
-        elseif((Get-Value $summary 'HasScriptIndicator') -eq 1 -and $class -match '(?i)Script'){$rule='ScriptComponent'}
-        if($rule){[void]$items.Add(('{0}:{1}' -f $rule,$name))}
-    }
-    foreach($property in $xml.SelectNodes("//*[local-name()='property']")) {
-        if(([string]$property.InnerText) -notmatch '(?is)\bselect\s+\*'){continue}
-        $parent=$property.ParentNode; $componentName=''
-        while($parent -and !$componentName){if($parent.LocalName -eq 'component'){$componentName=[string]$parent.GetAttribute('name')};$parent=$parent.ParentNode}
-        if($componentName){[void]$items.Add(('SELECT*:{0}' -f $componentName))}
-    }
-    return (($items | Select-Object -Unique) -join ';')
-}
-function Get-SelectStarCount([string]$path) {
-    if(!(Test-Path -LiteralPath $path)){return 0}
-    try { $text=[IO.File]::ReadAllText($path); return ([regex]::Matches($text,'(?is)\bselect\s+\*')).Count } catch { return 0 }
-}
-function Get-TextPatternMetrics([string]$text) {
-    $m=[ordered]@{}
-    $m.FastLoadInactive=Count-Match $text '(?is)componentClassID="[^"]*OLEDBDestination[^"]*".*?FastLoadOptions.*?(?!TABLOCK)'
-    $m.NoTABLOCK=Count-Match $text '(?is)FastLoadOptions">(?![^<]*TABLOCK)[^<]*</property>'
-    $m.LookupPartialNoCache=Count-Match $text '(?is)(?:CacheType|CacheMode)[^>]*>[^<]*(?:Partial|NoCache)'
-    $m.OLEDBCommand=Count-Match $text '(?i)(?:componentClassID="[^"]*OLEDBCommand|DTS:ExecutableType="[^"]*ExecuteSQLTask)'
-    $m.CartesianCrossJoin=Count-ActiveCrossJoin $text
-    $m.NonSargableFunctionPredicate=Count-Match $text '\b(?:YEAR|MONTH|DAY|UPPER|LOWER|CAST|CONVERT|ISNULL|COALESCE|RTRIM|LTRIM|SUBSTRING|DATEPART|FORMAT)\s*\('
-    $m.OnTheFlyFunctionExpression=Count-Match $text '\b(?:SUBSTRING|DATEADD|DATEDIFF|CONCAT|CAST|CONVERT|RTRIM|LTRIM|ISNULL|COALESCE|FORMAT)\s*\('
-    $m.NestedViewReference=Count-Match $text '\b(?:vw_|view_)[A-Za-z0-9_]+'; $m.PivotWindowFunction=Count-Match $text '\b(?:PIVOT|UNPIVOT)\b|\bOVER\s*\('; $m.UnionAll=Count-Match $text '\bUNION\s+ALL\b'; $m.NoLockAdvisory=Count-Match $text '\bNOLOCK\b'
-    $m.ImplicitConversionIndicator=Count-Match $text '(?:Microsoft\.DataConvert|DT_WSTR|DT_STR|DT_NTEXT|DT_TEXT|DT_IMAGE)'; $m.ADO_NET_or_ODBC_Provider=Count-Match $text '(?:CreationName="ADO\.NET|CreationName="ODBC|ADO\.NET|ODBC)'; $m.ExplicitBufferOrThreadSetting=Count-Match $text '(?:DefaultBufferMaxRows|DefaultBufferSize|AutoAdjustBufferSize|EngineThreads|MaxConcurrentExecutables)'; $m.TempStoragePathSetting=Count-Match $text '(?:BLOBTempStoragePath|BufferTempStoragePath)'; $m.DestinationCommitSizeSetting=Count-CommitRisk $text; $m.ExecutePackageTask=Count-Match $text 'Microsoft\.ExecutePackageTask'; $m.CheckpointSetting=Count-Match $text '(?:SaveCheckpoints|CheckpointUsage)'; $m.FullReloadIndicator=Count-Match $text '(?:TRUNCATE\s+TABLE|DELETE\s+FROM|INSERT\s+INTO)'
-    return [pscustomobject]$m
-}
-$summaryMap=@{}
-if(Test-Path -LiteralPath $summaryPath){foreach($s in (Import-Csv $summaryPath)){$key=('SSISDB/{0}/{1}/{2}' -f $s.FolderName,$s.ProjectName,$s.PackageName).Replace('\','/');$summaryMap[$key]=$s}}
-$rows=@()
+$repo=(Get-Location).Path
+$assessment=(Resolve-Path -LiteralPath $AssessmentPath).Path
+$extractRoot=Join-Path $assessment '01_static_packages\extracted'
+$summaryPath=Join-Path $assessment '01_static_packages\package_static_summary.csv'
+if(!(Test-Path -LiteralPath $extractRoot)){throw "Extracted DTSX path not found: $extractRoot"}
 if(!(Test-Path -LiteralPath $summaryPath)){throw "Static summary not found: $summaryPath"}
-foreach($base in (Import-Csv $summaryPath)){
-    $packageFile = [string]$base.PackageName
-    if($packageFile -notmatch '(?i)\.dtsx$'){$packageFile += '.dtsx'}
-    $relative=('SSISDB/{0}/{1}/{2}' -f $base.FolderName,$base.ProjectName,$packageFile).Replace('\','/')
-    $dtsxPath=Join-Path $extractRoot ($relative.Replace('/','\')); $rawText=''; try{$rawText=[IO.File]::ReadAllText($dtsxPath)}catch{}; $components=Get-ComponentFindings $dtsxPath $base; $metrics=Get-TextPatternMetrics $rawText
-    $row=[ordered]@{PackageFile=$relative;Sort=(Get-Value $base 'HasSortIndicator');Aggregate=(Get-Value $base 'HasAggregateIndicator');FuzzyLookup=(Get-Value $base 'HasLookupIndicator');FastLoadInactive=$metrics.FastLoadInactive;NoTABLOCK=$metrics.NoTABLOCK;LookupPartialNoCache=$metrics.LookupPartialNoCache;'SELECT*'=(Count-Match $rawText '(?is)\bselect\s+\*');OLEDBCommand=$metrics.OLEDBCommand;CartesianCrossJoin=$metrics.CartesianCrossJoin;NonSargableFunctionPredicate=$metrics.NonSargableFunctionPredicate;OnTheFlyFunctionExpression=$metrics.OnTheFlyFunctionExpression;NestedViewReference=$metrics.NestedViewReference;PivotWindowFunction=$metrics.PivotWindowFunction;UnionAll=$metrics.UnionAll;NoLockAdvisory=$metrics.NoLockAdvisory;MergeJoinComponent=(Get-Value $base 'HasMergeIndicator');ImplicitConversionIndicator=$metrics.ImplicitConversionIndicator;ScriptComponent=(Get-Value $base 'HasScriptIndicator');ADO_NET_or_ODBC_Provider=$metrics.ADO_NET_or_ODBC_Provider;ExplicitBufferOrThreadSetting=$metrics.ExplicitBufferOrThreadSetting;TempStoragePathSetting=$metrics.TempStoragePathSetting;DestinationCommitSizeSetting=$metrics.DestinationCommitSizeSetting;ExecutePackageTask=$metrics.ExecutePackageTask;CheckpointSetting=$metrics.CheckpointSetting;FullReloadIndicator=$metrics.FullReloadIndicator;anti_pattern_components=$components}
-    $rows += [pscustomobject]$row
+if(!(Test-Path -LiteralPath $OutputPath)){New-Item -ItemType Directory -Path $OutputPath -Force|Out-Null}
+$suffix=if([string]::IsNullOrWhiteSpace($ReportSuffix)){''}else{'_'+$ReportSuffix}
+$outCsv=Join-Path $OutputPath ('DTSX_ANTIPATTERN_PACKAGE_FINDINGS'+$suffix+'.csv')
+$outMd=Join-Path $OutputPath ('DTSX_ANTIPATTERN_INSPECTION_REPORT'+$suffix+'.md')
+
+function Count-Match([string]$text,[string]$pattern){if([string]::IsNullOrWhiteSpace($text)){return 0};return ([regex]::Matches($text,$pattern,[Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count}
+function Get-Attr([Xml.XmlNode]$node,[string]$name){if(!$node -or !$node.Attributes){return ''};foreach($a in $node.Attributes){if($a.LocalName -eq $name){return [string]$a.Value}};return ''}
+function Get-Prop([Xml.XmlNode]$node,[string]$name){foreach($p in $node.SelectNodes(".//*[local-name()='property']")){if((Get-Attr $p 'name') -eq $name){return [string]$p.InnerText}};return ''}
+function Test-True([string]$value){return $value -match '^(?i:true|1|-1)$'}
+function Add-Detail([Collections.Generic.List[string]]$items,[string]$rule,[string]$name){if($name){[void]$items.Add(('{0}:{1}' -f $rule,($name-replace';',',')))}}
+function Get-SqlText([xml]$xml){
+    $parts=New-Object 'System.Collections.Generic.List[string]'
+    foreach($p in $xml.SelectNodes("//*[local-name()='property']")){$n=Get-Attr $p 'name';$v=[string]$p.InnerText;if($n-match'(?i)^(SqlCommand|SqlStatementSource|CommandText|OpenRowset)$'-and$v-match'(?i)\b(SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC(?:UTE)?)\b'){[void]$parts.Add($v)}}
+    foreach($n in $xml.SelectNodes("//*[@*[local-name()='SqlStatementSource']]")){foreach($a in $n.Attributes){if($a.LocalName-match'(?i)SqlStatementSource'-and$a.Value-match'(?i)\b(SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC(?:UTE)?)\b'){[void]$parts.Add($a.Value)}}}
+    return ($parts-join"`n")
 }
+function Get-Scan([string]$path,[object]$summary){
+    $m=[ordered]@{Sort=0;Aggregate=0;FuzzyLookup=0;FuzzyGrouping=0;LookupComponent=0;LookupPartialNoCache=0;MergeComponent=0;MergeJoinComponent=0;UnionAllComponent=0;ConditionalSplitFilter=0;DataConversionComponent=0;OLEDBCommand=0;ScriptComponent=0;FastLoadInactive=0;NoTABLOCK=0;DestinationCommitSizeSetting=0;'SELECT*'=0;CartesianCrossJoin=0;ImplicitCartesianJoin=0;NonSargableFunctionPredicate=0;OnTheFlyFunctionExpression=0;NestedViewReference=0;PivotWindowFunction=0;SqlUnionDistinct=0;SqlUnionAll=0;NoLockAdvisory=0;FullReloadIndicator=0;ADO_NET_or_ODBC_Provider=0;DelayValidationDisabled=0;ValidateExternalMetadataEnabled=0;ExplicitBufferOrThreadSetting=0;TempStoragePathSetting=0;ExecutePackageTask=0;CheckpointDisabled=0;TransactionEnabled=0;MonolithicPackage=0;ParseError=0}
+    $items=New-Object 'System.Collections.Generic.List[string]'
+    try{[xml]$xml=[IO.File]::ReadAllText($path)}catch{$m.ParseError=1;return [pscustomobject]@{Metrics=[pscustomobject]$m;Components='';Error=$_.Exception.Message}}
+    foreach($c in $xml.SelectNodes("//*[local-name()='component']")){
+        $name=Get-Attr $c 'name';$class=Get-Attr $c 'componentClassID';$rule=''
+        switch -Regex($class){'(?i)\.Sort$'{$m.Sort++;$rule='Sort';break};'(?i)\.Aggregate$'{$m.Aggregate++;$rule='Aggregate';break};'(?i)FuzzyLookup'{$m.FuzzyLookup++;$rule='FuzzyLookup';break};'(?i)FuzzyGrouping'{$m.FuzzyGrouping++;$rule='FuzzyGrouping';break};'(?i)\.Lookup$'{$m.LookupComponent++;$rule='LookupComponent';$cache=Get-Prop $c 'CacheType';if($cache-match'^(?i:1|2|Partial|NoCache|None)$'){$m.LookupPartialNoCache++;Add-Detail $items 'LookupPartialNoCache' $name};break};'(?i)\.MergeJoin$'{$m.MergeJoinComponent++;$rule='MergeJoinComponent';break};'(?i)\.Merge$'{$m.MergeComponent++;$rule='MergeComponent';break};'(?i)\.UnionAll$'{$m.UnionAllComponent++;$rule='UnionAllComponent';break};'(?i)ConditionalSplit'{$m.ConditionalSplitFilter++;$rule='ConditionalSplitFilter';break};'(?i)DataConvert'{$m.DataConversionComponent++;$rule='DataConversionComponent';break};'(?i)OLEDBCommand'{$m.OLEDBCommand++;$rule='OLEDBCommand';break};'(?i)(Script|ManagedComponentHost)'{$m.ScriptComponent++;$rule='ScriptComponent';break}}
+        if($rule){Add-Detail $items $rule $name}
+        if($class-match'(?i)OLEDBDestination'){$access=Get-Prop $c 'AccessMode';if($access-ne'3'-and$access-ne'4'){$m.FastLoadInactive++;Add-Detail $items 'FastLoadInactive' $name}else{$options=Get-Prop $c 'FastLoadOptions';if($options-notmatch'(?i)(^|,)\s*TABLOCK\s*(,|$)'){$m.NoTABLOCK++;Add-Detail $items 'NoTABLOCK' $name};$commit=Get-Prop $c 'FastLoadMaxInsertCommitSize';$v=0L;if([int64]::TryParse($commit,[ref]$v)-and$v-gt 0-and$v-lt 100000){$m.DestinationCommitSizeSetting++;Add-Detail $items 'DestinationCommitSizeSetting' $name}}}
+        $validate=Get-Prop $c 'ValidateExternalMetadata';if($validate-ne''-and(Test-True $validate)){$m.ValidateExternalMetadataEnabled++}
+    }
+    $sql=Get-SqlText $xml
+    $m.'SELECT*'=Count-Match $sql '\bSELECT\s+(?:TOP\s*\([^)]*\)\s+)?\*\s+FROM\b';$m.CartesianCrossJoin=Count-Match $sql '\bCROSS\s+JOIN\b';$m.ImplicitCartesianJoin=Count-Match $sql '\bFROM\s+[\[\]\w.]+(?:\s+\w+)?\s*,\s*[\[\]\w.]+';$m.NonSargableFunctionPredicate=Count-Match $sql '\b(?:WHERE|ON|AND|OR)\s+(?:\(+\s*)?(?:YEAR|MONTH|DAY|UPPER|LOWER|LEFT|RIGHT|CAST|CONVERT|ISNULL|COALESCE|RTRIM|LTRIM|SUBSTRING|DATEPART|FORMAT)\s*\(';$m.OnTheFlyFunctionExpression=Count-Match $sql '\b(?:SUBSTRING|DATEADD|DATEDIFF|CONCAT|CAST|CONVERT|RTRIM|LTRIM|ISNULL|COALESCE|FORMAT)\s*\(';$m.NestedViewReference=Count-Match $sql '\b(?:FROM|JOIN)\s+(?:\[[^]]+\]\.)?\[?(?:vw_|view_)[A-Za-z0-9_]+\]?';$m.PivotWindowFunction=Count-Match $sql '\b(?:PIVOT|UNPIVOT)\b|\bOVER\s*\(';$m.SqlUnionDistinct=Count-Match $sql '\bUNION\b(?!\s+ALL\b)';$m.SqlUnionAll=Count-Match $sql '\bUNION\s+ALL\b';$m.NoLockAdvisory=Count-Match $sql '\bNOLOCK\b';$m.FullReloadIndicator=Count-Match $sql '\bTRUNCATE\s+TABLE\b|\bDELETE\s+FROM\b'
+    $raw=$xml.OuterXml;$m.ADO_NET_or_ODBC_Provider=Count-Match $raw 'CreationName="[^"]*(?:ADO\.NET|ODBC)|componentClassID="[^"]*(?:ADO\.NET|ODBC|SSISODBC)'
+    foreach($n in $xml.SelectNodes("//*[local-name()='Executable']|//*[local-name()='ConnectionManager']")){$delay=Get-Attr $n 'DelayValidation';if($delay-ne''-and!(Test-True $delay)){$m.DelayValidationDisabled++}}
+    foreach($p in $xml.SelectNodes("//*[local-name()='Property']|//*[local-name()='property']")){$n=Get-Attr $p 'Name';if(!$n){$n=Get-Attr $p 'name'};if($n-match'^(DefaultBufferMaxRows|DefaultBufferSize|AutoAdjustBufferSize|EngineThreads|MaxConcurrentExecutables)$'){$m.ExplicitBufferOrThreadSetting++};if($n-match'^(BLOBTempStoragePath|BufferTempStoragePath)$'-and![string]::IsNullOrWhiteSpace($p.InnerText)){$m.TempStoragePathSetting++}}
+    $m.ExecutePackageTask=Count-Match $raw 'Microsoft\.ExecutePackageTask';if((Count-Match $raw '(?:SaveCheckpoints[^>]*>|Name="SaveCheckpoints"[^>]*>)(?:false|0)')-gt 0-or(Count-Match $raw '(?:CheckpointUsage[^>]*>|Name="CheckpointUsage"[^>]*>)(?:Never|0)')-gt 0){$m.CheckpointDisabled=1};$m.TransactionEnabled=Count-Match $raw '(?:TransactionOption[^>]*>|Name="TransactionOption"[^>]*>)(?:Required|Supported|1|2)'
+    $exec=0;$comp=0;if($summary.PSObject.Properties['ExecutableNodeCount']){$exec=[int]$summary.ExecutableNodeCount};if($summary.PSObject.Properties['DataFlowComponentCount']){$comp=[int]$summary.DataFlowComponentCount};if($exec-ge 50-or$comp-ge 100){$m.MonolithicPackage=1}
+    return [pscustomobject]@{Metrics=[pscustomobject]$m;Components=(($items|Select-Object -Unique)-join';');Error=''}
+}
+$columns=@('Sort','Aggregate','FuzzyLookup','FuzzyGrouping','LookupComponent','LookupPartialNoCache','MergeComponent','MergeJoinComponent','UnionAllComponent','ConditionalSplitFilter','DataConversionComponent','OLEDBCommand','ScriptComponent','FastLoadInactive','NoTABLOCK','DestinationCommitSizeSetting','SELECT*','CartesianCrossJoin','ImplicitCartesianJoin','NonSargableFunctionPredicate','OnTheFlyFunctionExpression','NestedViewReference','PivotWindowFunction','SqlUnionDistinct','SqlUnionAll','NoLockAdvisory','FullReloadIndicator','ADO_NET_or_ODBC_Provider','DelayValidationDisabled','ValidateExternalMetadataEnabled','ExplicitBufferOrThreadSetting','TempStoragePathSetting','ExecutePackageTask','CheckpointDisabled','TransactionEnabled','MonolithicPackage','ParseError')
+$rows=@();foreach($base in(Import-Csv $summaryPath)){$file=[string]$base.PackageName;if($file-notmatch'(?i)\.dtsx$'){$file+='.dtsx'};$relative=('SSISDB/{0}/{1}/{2}'-f$base.FolderName,$base.ProjectName,$file).Replace('\','/');$path=Join-Path $extractRoot ($relative.Replace('/','\'));if(Test-Path -LiteralPath $path){$scan=Get-Scan $path $base}else{$scan=[pscustomobject]@{Metrics=[pscustomobject]@{ParseError=1};Components='';Error='DTSX file not found'}};$row=[ordered]@{PackageFile=$relative;ParseStatus=if($scan.Metrics.ParseError-eq 0){'OK'}else{'ERROR'};ParseErrorMessage=$scan.Error};foreach($column in $columns){$value=0;if($scan.Metrics.PSObject.Properties[$column]){$value=[int]$scan.Metrics.$column};$row[$column]=$value};$row['anti_pattern_components']=$scan.Components;$rows+=[pscustomobject]$row}
 $rows=@($rows|Sort-Object PackageFile);$rows|Export-Csv $outCsv -NoTypeInformation -Encoding UTF8
-$columns=@('Sort','Aggregate','FuzzyLookup','FastLoadInactive','NoTABLOCK','LookupPartialNoCache','SELECT*','OLEDBCommand','CartesianCrossJoin','NonSargableFunctionPredicate','OnTheFlyFunctionExpression','NestedViewReference','PivotWindowFunction','UnionAll','NoLockAdvisory','MergeJoinComponent','ImplicitConversionIndicator','ScriptComponent','ADO_NET_or_ODBC_Provider','ExplicitBufferOrThreadSetting','TempStoragePathSetting','DestinationCommitSizeSetting','ExecutePackageTask','CheckpointSetting','FullReloadIndicator')
-$lines=New-Object 'System.Collections.Generic.List[string]';$lines.Add('# DTSX Anti-Pattern Inspection Report');$lines.Add('');$lines.Add(('Scope: {0} extracted DTSX files under `{1}`.' -f $rows.Count,($assessment.Substring($repo.Length+1).Replace('\','/')+'/01_static_packages/extracted')));$lines.Add(('Guide reference: `{0}`.' -f $GuidePath));$lines.Add('');$lines.Add('| Rule | Occurrences | Files | Interpretation |');$lines.Add('|---|---:|---:|---|')
-foreach($column in $columns){$total=($rows|Measure-Object -Property $column -Sum).Sum;$count=@($rows|Where-Object{[int]$_.$column -gt 0}).Count;$meaning='Static review candidate; runtime impact not proven.';if($column -eq 'CartesianCrossJoin'){$meaning='Review intent/cardinality; not automatically accidental.'};if($column -eq 'NoLockAdvisory'){$meaning='Advisory only; dirty-read correctness risk.'};$lines.Add(('| ``{0}`` | {1} | {2} | {3} |' -f $column,$total,$count,$meaning))}
-$lines.Add('');$lines.Add('## Evidence boundary');$lines.Add('');$lines.Add('- Static indicators are candidates, not proof of a runtime bottleneck. Correlate with runtime duration, executable timing, status, and comparable executions.');$lines.Add('- Query plans, waits, blocking, I/O, CPU/RAM, tempdb, destination indexes, and actual buffer spooling require runtime/server evidence.');$lines.Add('- Findings are generated standalone from the selected assessment; no previous findings baseline is required.');[IO.File]::WriteAllLines($outMd,$lines,(New-Object Text.UTF8Encoding($false)));Write-Host "Wrote $outCsv and $outMd ($($rows.Count) rows)"
+$special=@{CartesianCrossJoin='Review intent/cardinality; CROSS JOIN can be deliberate.';NoLockAdvisory='Correctness advisory, not a performance recommendation.';LookupComponent='Inventory only; cache mode and runtime volume determine risk.';ExecutePackageTask='Architecture inventory, not an anti-pattern by itself.';ExplicitBufferOrThreadSetting='Configuration inventory; inspect actual values and runtime symptoms.';TempStoragePathSetting='Configuration inventory; does not prove buffer spooling.';CheckpointDisabled='Recovery candidate; useful only for restartable control flows.';TransactionEnabled='Reliability/overhead candidate; preserve transaction semantics.';MonolithicPackage='Complexity candidate: >=50 executables or >=100 data-flow components.'}
+$lines=New-Object 'System.Collections.Generic.List[string]';$relativeRoot=($assessment.Substring($repo.Length+1).Replace('\','/')+'/01_static_packages/extracted');$lines.Add('# DTSX Anti-Pattern Inspection Report');$lines.Add('');$lines.Add(('Scope: {0} package rows under `{1}`.'-f$rows.Count,$relativeRoot));$lines.Add(('Guide reference: `{0}`.'-f$GuidePath));$lines.Add('Coverage: all guide rules observable defensibly from DTSX/XML. Runtime, server, database, schedule, and code-semantic rules remain evidence gaps.');$lines.Add('');$lines.Add('| Rule | Occurrences | Files | Interpretation |');$lines.Add('|---|---:|---:|---|');foreach($column in $columns){$total=($rows|Measure-Object -Property $column -Sum).Sum;$count=@($rows|Where-Object{[int]$_.$column-gt 0}).Count;$meaning='Static investigation candidate; runtime impact not proven.';if($special.ContainsKey($column)){$meaning=$special[$column]};$lines.Add(('| `{0}` | {1} | {2} | {3} |'-f$column,$total,$count,$meaning))};$lines.Add('');$lines.Add('## Evidence boundary');$lines.Add('');$lines.Add('- SQL heuristics scan SQL-bearing DTSX properties rather than all XML metadata.');$lines.Add('- Component inventory is not causal proof; correlate with duration, component phase, rows/volume, and comparable tests.');$lines.Add('- Indexes/plans/waits/blocking/I/O, resource pressure, logging, destination triggers, actual spooling, and Script code behavior cannot be proven from DTSX.');$lines.Add('- `ConditionalSplitFilter` is a filter-pushdown candidate; the component can implement valid routing.');$lines.Add('- `DataConversionComponent` is explicit conversion inventory, not proof of an implicit type mismatch.');$lines.Add('- Existing raw evidence and ISPAC/DTSX source files were not modified.');[IO.File]::WriteAllLines($outMd,$lines,(New-Object Text.UTF8Encoding($false)));Write-Host "Wrote $outCsv and $outMd ($($rows.Count) rows; $(@($rows|Where-Object{$_.ParseStatus-ne'OK'}).Count) parse errors)"

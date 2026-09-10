@@ -60,7 +60,7 @@ foreach ($execution in $executions.Values) {
     [void]$executionByPackage[$executionKey].Add($candidateRow)
 }
 $findings = @{}
-$antiPatternColumns = @('Sort','Aggregate','FuzzyLookup','FastLoadInactive','NoTABLOCK','LookupPartialNoCache','SELECT*','OLEDBCommand','CartesianCrossJoin','NonSargableFunctionPredicate','OnTheFlyFunctionExpression','NestedViewReference','PivotWindowFunction','UnionAll','NoLockAdvisory','MergeJoinComponent','ImplicitConversionIndicator','ScriptComponent','ADO.NET_or_ODBC_Provider','ExplicitBufferOrThreadSetting','TempStoragePathSetting','DestinationCommitSizeSetting','ExecutePackageTask','CheckpointSetting','FullReloadIndicator')
+$antiPatternColumns = @('Sort','Aggregate','FuzzyLookup','FuzzyGrouping','LookupPartialNoCache','MergeComponent','MergeJoinComponent','ConditionalSplitFilter','DataConversionComponent','OLEDBCommand','ScriptComponent','FastLoadInactive','NoTABLOCK','DestinationCommitSizeSetting','SELECT*','CartesianCrossJoin','ImplicitCartesianJoin','NonSargableFunctionPredicate','OnTheFlyFunctionExpression','NestedViewReference','PivotWindowFunction','SqlUnionDistinct','FullReloadIndicator','ADO_NET_or_ODBC_Provider','DelayValidationDisabled','ValidateExternalMetadataEnabled','CheckpointDisabled','TransactionEnabled','MonolithicPackage')
 foreach ($row in (Import-Csv $StaticFindingsPath)) {
     if ($row.PSObject.Properties.Name -contains 'PackageFile') {
         $findings[$row.PackageFile] = $row
@@ -107,7 +107,7 @@ function Get-AntiPatternInfo([object]$finding) {
     }
     $components=''
     if($finding -and $finding.PSObject.Properties['anti_pattern_components']){$components=[string]$finding.anti_pattern_components}
-    return [pscustomobject]@{ Count=$count; Fields=($names -join ';'); Components=$components }
+    return [pscustomobject]@{ Count=$count; RuleCount=$names.Count; Fields=($names -join ';'); Components=$components }
 }
 function Get-ProvisionalPriority([double]$durationSeconds, [string]$status) {
     if ($status -ne '1' -and $status -ne 'Succeeded') { return [pscustomobject]@{ Level='P1'; Basis='PROVISIONAL_JOB_STEP_FAILURE' } }
@@ -155,19 +155,20 @@ $mapped = foreach ($row in $history) {
                         execution_id = $candidate.execution_id; job_id = $row.job_id; job_name = $row.job_name; step_id = $row.step_id; step_name = $row.step_name
                         command_package = $commandKey; candidate_package = ("SSISDB/{0}/{1}/{2}" -f $candidate.folder_name,$candidate.project_name,$candidate.package_name)
                         command_start_time = $row.($historyStartField); command_end_time = $row.($historyEndField); job_step_duration_sec = [math]::Round($jobStepDuration,2); job_step_status = $row.run_status_desc; execution_start_time = $candidate.start_time; execution_end_time = $candidate.end_time
-                        candidate_count = $possible.Count; confidence = if ($possible.Count -eq 1) { 'COMMAND_TIME_CANDIDATE' } else { 'AMBIGUOUS_TIME_OVERLAP' }; priority_level = $provisional.Level; priority_confidence = 'PROVISIONAL_JOB_STEP'; priority_basis = $provisional.Basis; anti_pattern_count = $commandAnti.Count; anti_pattern_fields = $commandAnti.Fields; anti_pattern_components = $commandAnti.Components
+                        candidate_count = $possible.Count; confidence = if ($possible.Count -eq 1) { 'COMMAND_TIME_CANDIDATE' } else { 'AMBIGUOUS_TIME_OVERLAP' }; priority_level = $provisional.Level; priority_confidence = 'PROVISIONAL_JOB_STEP'; priority_basis = $provisional.Basis; anti_pattern_count = $commandAnti.Count; anti_pattern_rule_count = $commandAnti.RuleCount; anti_pattern_fields = $commandAnti.Fields; anti_pattern_components = $commandAnti.Components
                     }
                 }
             }
             $mismatches += [pscustomobject]@{
                 execution_id = $executionId; job_id = $row.job_id; job_name = $row.job_name; step_id = $row.step_id; step_name = $row.step_name
-                command_package = $commandKey; execution_package = $executionKey; job_step_start_time = $row.($historyStartField); job_step_end_time = $row.($historyEndField); job_step_duration_sec = [math]::Round($jobStepDuration,2); job_step_status = $row.run_status_desc; priority_level = $provisional.Level; priority_confidence = 'PROVISIONAL_JOB_STEP'; priority_basis = $provisional.Basis; anti_pattern_count = $commandAnti.Count; anti_pattern_fields = $commandAnti.Fields; anti_pattern_components = $commandAnti.Components; reason = 'SQL Agent command package differs from package recorded for the same SSIS Execution ID'
+                command_package = $commandKey; execution_package = $executionKey; job_step_start_time = $row.($historyStartField); job_step_end_time = $row.($historyEndField); job_step_duration_sec = [math]::Round($jobStepDuration,2); job_step_status = $row.run_status_desc; priority_level = $provisional.Level; priority_confidence = 'PROVISIONAL_JOB_STEP'; priority_basis = $provisional.Basis; anti_pattern_count = $commandAnti.Count; anti_pattern_rule_count = $commandAnti.RuleCount; anti_pattern_fields = $commandAnti.Fields; anti_pattern_components = $commandAnti.Components; reason = 'SQL Agent command package differs from package recorded for the same SSIS Execution ID'
             }
             continue
         }
     }
     $finding = $findings[$key]
     if (!$finding) { continue }
+    $antiInfo = Get-AntiPatternInfo $finding
     $adoProviderCount = 0
     if ($finding.PSObject.Properties['ADO.NET_or_ODBC_Provider']) { $adoProviderCount = [int]$finding.'ADO.NET_or_ODBC_Provider' }
     elseif ($finding.PSObject.Properties['ADO_NET_or_ODBC_Provider']) { $adoProviderCount = [int]$finding.ADO_NET_or_ODBC_Provider }
@@ -179,7 +180,7 @@ $mapped = foreach ($row in $history) {
         anti_sort = [int]$finding.Sort; anti_aggregate = [int]$finding.Aggregate; anti_fuzzy_lookup = [int]$finding.FuzzyLookup
         anti_fast_load_inactive = [int]$finding.FastLoadInactive; anti_no_tablock = [int]$finding.NoTABLOCK
         anti_lookup_partial_no_cache = [int]$finding.LookupPartialNoCache; anti_select_star = [int]$finding.'SELECT*'; anti_oledb_command = [int]$finding.OLEDBCommand
-         CartesianCrossJoin = [int]$finding.CartesianCrossJoin; NonSargableFunctionPredicate = [int]$finding.NonSargableFunctionPredicate; OnTheFlyFunctionExpression = [int]$finding.OnTheFlyFunctionExpression; NestedViewReference = [int]$finding.NestedViewReference; PivotWindowFunction = [int]$finding.PivotWindowFunction; UnionAll = [int]$finding.UnionAll; NoLockAdvisory = [int]$finding.NoLockAdvisory; MergeJoinComponent = [int]$finding.MergeJoinComponent; ImplicitConversionIndicator = [int]$finding.ImplicitConversionIndicator; ScriptComponent = [int]$finding.ScriptComponent; ADO_NET_or_ODBC_Provider = $adoProviderCount; ExplicitBufferOrThreadSetting = [int]$finding.ExplicitBufferOrThreadSetting; TempStoragePathSetting = [int]$finding.TempStoragePathSetting; DestinationCommitSizeSetting = [int]$finding.DestinationCommitSizeSetting; ExecutePackageTask = [int]$finding.ExecutePackageTask; CheckpointSetting = [int]$finding.CheckpointSetting; FullReloadIndicator = [int]$finding.FullReloadIndicator; anti_pattern_components = [string]$finding.anti_pattern_components
+         CartesianCrossJoin = [int]$finding.CartesianCrossJoin; NonSargableFunctionPredicate = [int]$finding.NonSargableFunctionPredicate; OnTheFlyFunctionExpression = [int]$finding.OnTheFlyFunctionExpression; NestedViewReference = [int]$finding.NestedViewReference; PivotWindowFunction = [int]$finding.PivotWindowFunction; UnionAll = [int]$finding.SqlUnionAll; NoLockAdvisory = [int]$finding.NoLockAdvisory; MergeJoinComponent = [int]$finding.MergeJoinComponent; ImplicitConversionIndicator = [int]$finding.DataConversionComponent; ScriptComponent = [int]$finding.ScriptComponent; ADO_NET_or_ODBC_Provider = $adoProviderCount; ExplicitBufferOrThreadSetting = [int]$finding.ExplicitBufferOrThreadSetting; TempStoragePathSetting = [int]$finding.TempStoragePathSetting; DestinationCommitSizeSetting = [int]$finding.DestinationCommitSizeSetting; ExecutePackageTask = [int]$finding.ExecutePackageTask; CheckpointSetting = [int]$finding.CheckpointDisabled; FullReloadIndicator = [int]$finding.FullReloadIndicator; anti_pattern_count = $antiInfo.Count; anti_pattern_rule_count = $antiInfo.RuleCount; anti_pattern_fields = $antiInfo.Fields; anti_pattern_components = [string]$finding.anti_pattern_components
     }
 }
 
@@ -190,10 +191,11 @@ $report = foreach ($group in $groups) {
     $avgSec = (($rows | Measure-Object package_duration_sec -Average).Average)
     $totalSec = (($rows | Measure-Object package_duration_sec -Sum).Sum)
     $failed = @($rows | Where-Object { $_.ssis_status -ne 'Succeeded' }).Count
-    $antiTotal = @($first.anti_sort,$first.anti_aggregate,$first.anti_fuzzy_lookup,$first.anti_fast_load_inactive,$first.anti_no_tablock,$first.anti_lookup_partial_no_cache,$first.anti_select_star,$first.anti_oledb_command,$first.CartesianCrossJoin,$first.NonSargableFunctionPredicate,$first.OnTheFlyFunctionExpression,$first.NestedViewReference,$first.PivotWindowFunction,$first.UnionAll,$first.NoLockAdvisory,$first.MergeJoinComponent,$first.ImplicitConversionIndicator,$first.ScriptComponent,$first.ADO_NET_or_ODBC_Provider,$first.ExplicitBufferOrThreadSetting,$first.TempStoragePathSetting,$first.DestinationCommitSizeSetting,$first.ExecutePackageTask,$first.CheckpointSetting,$first.FullReloadIndicator) | Measure-Object -Sum | Select-Object -ExpandProperty Sum
+    $antiTotal = [int]$first.anti_pattern_count
+    $antiRuleCount = [int]$first.anti_pattern_rule_count
     if ($failed -gt 0 -or $avgSec -ge 1800 -or $totalSec -ge 7200) {
         $priority = 'P1'; $priorityBasis = 'High runtime or reliability impact'
-    } elseif ($avgSec -ge 600 -or $antiTotal -ge 10) {
+    } elseif ($avgSec -ge 600 -or $antiRuleCount -ge 10) {
         $priority = 'P2'; $priorityBasis = 'Material optimization/investigation candidate'
     } else {
         $priority = 'P3'; $priorityBasis = 'Lower-impact or static-only optimization candidate'
@@ -211,6 +213,7 @@ $report = foreach ($group in $groups) {
         anti_fast_load_inactive = $first.anti_fast_load_inactive; anti_no_tablock = $first.anti_no_tablock
         anti_lookup_partial_no_cache = $first.anti_lookup_partial_no_cache; anti_select_star = $first.anti_select_star; anti_oledb_command = $first.anti_oledb_command
         CartesianCrossJoin = $first.CartesianCrossJoin; NonSargableFunctionPredicate = $first.NonSargableFunctionPredicate; OnTheFlyFunctionExpression = $first.OnTheFlyFunctionExpression; NestedViewReference = $first.NestedViewReference; PivotWindowFunction = $first.PivotWindowFunction; UnionAll = $first.UnionAll; NoLockAdvisory = $first.NoLockAdvisory; MergeJoinComponent = $first.MergeJoinComponent; ImplicitConversionIndicator = $first.ImplicitConversionIndicator; ScriptComponent = $first.ScriptComponent; ADO_NET_or_ODBC_Provider = $first.ADO_NET_or_ODBC_Provider; ExplicitBufferOrThreadSetting = $first.ExplicitBufferOrThreadSetting; TempStoragePathSetting = $first.TempStoragePathSetting; DestinationCommitSizeSetting = $first.DestinationCommitSizeSetting; ExecutePackageTask = $first.ExecutePackageTask; CheckpointSetting = $first.CheckpointSetting; FullReloadIndicator = $first.FullReloadIndicator
+         anti_pattern_count = $antiTotal; anti_pattern_rule_count = $antiRuleCount; anti_pattern_fields = $first.anti_pattern_fields
          priority_level = $priority; priority_basis = $priorityBasis
          anti_pattern_components = $first.anti_pattern_components
     }
@@ -231,19 +234,19 @@ $lines.Add("Mapped active job-step/package groups: $($report.Count)")
 $lines.Add(('Excluded Execution ID/package mismatches: {0}; see `{1}`.' -f $mismatches.Count, $mismatchFileName))
 $lines.Add(('Command/time candidate mode: {0}; candidate rows: {1}.' -f ([string]$IncludeCommandTimeCandidates), $candidates.Count))
 $lines.Add('')
-$lines.Add('| Rank | Priority | Job | Step | Package | Executions | Avg min | Max min | Total hours | Failed | Anti-patterns |')
+$lines.Add('| Rank | Priority | Job | Step | Package | Executions | Avg min | Max min | Total hours | Failed | Static rules |')
 $lines.Add('|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|')
 $rank = 0
 foreach ($row in $report) {
     $rank++
-    $anti = @($row.anti_sort,$row.anti_aggregate,$row.anti_fuzzy_lookup,$row.anti_fast_load_inactive,$row.anti_no_tablock,$row.anti_lookup_partial_no_cache,$row.anti_select_star,$row.anti_oledb_command,$row.CartesianCrossJoin,$row.NonSargableFunctionPredicate,$row.OnTheFlyFunctionExpression,$row.NestedViewReference,$row.PivotWindowFunction,$row.UnionAll,$row.NoLockAdvisory,$row.MergeJoinComponent,$row.ImplicitConversionIndicator,$row.ScriptComponent,$row.ADO_NET_or_ODBC_Provider,$row.ExplicitBufferOrThreadSetting,$row.TempStoragePathSetting,$row.DestinationCommitSizeSetting,$row.ExecutePackageTask,$row.CheckpointSetting,$row.FullReloadIndicator) | Measure-Object -Sum | Select-Object -ExpandProperty Sum
+    $anti = $row.anti_pattern_rule_count
     $lines.Add("| $rank | $($row.priority_level) | $($row.job_name) | $($row.step_id): $($row.step_name) | $($row.package_name) | $($row.execution_count) | $([math]::Round($row.avg_package_duration_sec / 60,1)) | $([math]::Round($row.max_package_duration_sec / 60,1)) | $([math]::Round($row.total_package_duration_sec / 3600,1)) | $($row.failed_or_unexpected_count) | $anti |")
 }
 $lines.Add('')
 $lines.Add('## Interpretation')
 $lines.Add('')
 $lines.Add('- Prioritize by average package duration first, then execution frequency and anti-pattern count.')
-$lines.Add('- Priority rule: P1 = any failure, average duration >= 30 minutes, or mapped cumulative duration >= 2 hours; P2 = average duration >= 10 minutes or at least 10 static findings; P3 = otherwise. P0 is not assigned automatically.')
+$lines.Add('- Priority rule: P1 = any failure, average duration >= 30 minutes, or mapped cumulative duration >= 2 hours; P2 = average duration >= 10 minutes or at least 10 distinct static candidate rules; P3 = otherwise. Static occurrence volume alone does not raise priority. P0 is not assigned automatically.')
 $lines.Add('- Job/step mapping is high confidence where the SQL Agent history message contains the matching SSIS `Execution ID`.')
 $lines.Add('- Package duration is SSIS execution duration; job-step duration includes SQL Agent overhead and should be used for end-to-end validation.')
 $lines.Add('- This report does not include disabled jobs and does not treat time-overlap-only candidates as confirmed mappings.')
