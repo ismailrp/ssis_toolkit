@@ -185,7 +185,8 @@ WHERE database_id > 4
 ORDER BY name;
 "@ -Timeout $Config.SqlCommandTimeoutSeconds
         $result = @()
-        foreach ($row in @($rows.Rows)) {
+        $rowItems = if ($rows -is [System.Data.DataTable]) { @($rows.Rows) } else { @($rows) }
+        foreach ($row in $rowItems) {
             $result += New-Object PSObject -Property @{
                 DatabaseName = [string]$row.database_name
                 QueryStoreOn = [bool]$row.is_query_store_on
@@ -444,6 +445,7 @@ if ($Config.CollectRuntime) {
     $lookback = [int]$Config.LookbackDays
     $maxExec = [int]$Config.MaxExecutions
     $executionTop = if ($maxExec -gt 0) { "TOP ($maxExec)" } else { "" }
+    $executionScopeOrder = if ($maxExec -gt 0) { "ORDER BY execution_id DESC" } else { "" }
 
     # ------------------------------------------------------------
     # Connectivity
@@ -548,7 +550,7 @@ if ($Config.CollectRuntime) {
     SELECT $executionTop execution_id
     FROM catalog.executions
     $executionWhere
-    ORDER BY execution_id DESC
+    $executionScopeOrder
 "@
 
     Collect-Query "executable_statistics" "03_runtime" "SSISDB" @"
@@ -677,6 +679,8 @@ if ($Config.CollectAdditionalEvidence -and $Config.CollectRuntime) {
     }
     $additionalWhere = @($additionalWhere | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $additionalWhereSql = ($additionalWhere -join " AND ")
+    $historyEndLiteral = if ($windowEnd) { $windowEnd.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss") }
+    $historyStartLiteral = if ($windowStart) { $windowStart.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).AddDays(-[int]$Config.LookbackDays).ToString("yyyy-MM-ddTHH:mm:ss") }
 
     $commandRedacted = "CAST(REPLACE(REPLACE(REPLACE(REPLACE(js.command, 'Password=', 'Password=[REDACTED]'), 'password=', 'password=[REDACTED]'), 'Pwd=', 'Pwd=[REDACTED]'), 'pwd=', 'pwd=[REDACTED]') AS nvarchar(max))"
     $definitionRedacted = "CAST(REPLACE(REPLACE(REPLACE(REPLACE(m.definition, 'Password=', 'Password=[REDACTED]'), 'password=', 'password=[REDACTED]'), 'Pwd=', 'Pwd=[REDACTED]'), 'pwd=', 'pwd=[REDACTED]') AS nvarchar(max))"
@@ -710,15 +714,16 @@ ORDER BY j.name, js.step_id;
     FROM dbo.sysjobhistory AS h
     INNER JOIN dbo.sysjobs AS j ON j.job_id=h.job_id
     LEFT JOIN dbo.sysjobsteps AS js ON js.job_id=h.job_id AND js.step_id=h.step_id
-    CROSS APPLY (SELECT DATETIMEFROMPARTS(h.run_date / 10000,
-        (h.run_date % 10000) / 100, h.run_date % 100,
-        h.run_time / 10000, (h.run_time % 10000) / 100,
-        h.run_time % 100, 0) AS step_start_time) AS ca
+    CROSS APPLY (SELECT TRY_CONVERT(datetime, CONVERT(varchar(8), h.run_date), 112) AS run_date_value,
+                        TRY_CONVERT(time(0), STUFF(STUFF(RIGHT('000000' + CONVERT(varchar(6), h.run_time), 6), 3, 0, ':'), 6, 0, ':')) AS run_time_value) AS rv
+    CROSS APPLY (SELECT DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS time), rv.run_time_value), CAST(rv.run_date_value AS datetime)) AS step_start_time) AS ca
     WHERE h.run_date >= 19000101
+      AND rv.run_date_value IS NOT NULL
+      AND rv.run_time_value IS NOT NULL
 )
 SELECT * FROM H
-WHERE step_start_time < CONVERT(datetime, '" + $(if ($windowEnd) { $windowEnd.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss") }) + "', 126)
-  AND step_end_time >= CONVERT(datetime, '" + $(if ($windowStart) { $windowStart.ToString("yyyy-MM-ddTHH:mm:ss") } else { (Get-Date).AddDays(-[int]$Config.LookbackDays).ToString("yyyy-MM-ddTHH:mm:ss") }) + "', 126)
+WHERE step_start_time < CONVERT(datetime, '$historyEndLiteral', 126)
+  AND step_end_time >= CONVERT(datetime, '$historyStartLiteral', 126)
 ORDER BY step_start_time, job_name, step_id;
 "@
 
@@ -751,11 +756,16 @@ ORDER BY j.name, s.name;
     FROM msdb.dbo.sysjobhistory AS h
     INNER JOIN msdb.dbo.sysjobs AS j ON j.job_id=h.job_id
     INNER JOIN msdb.dbo.sysjobsteps AS js ON js.job_id=h.job_id AND js.step_id=h.step_id
-    CROSS APPLY (SELECT DATETIMEFROMPARTS(h.run_date / 10000,
-        (h.run_date % 10000) / 100, h.run_date % 100,
-        h.run_time / 10000, (h.run_time % 10000) / 100,
-        h.run_time % 100, 0) AS start_time) AS ca
+    CROSS APPLY (SELECT TRY_CONVERT(datetime, CONVERT(varchar(8), h.run_date), 112) AS run_date_value,
+                        TRY_CONVERT(time(0), STUFF(STUFF(RIGHT('000000' + CONVERT(varchar(6), h.run_time), 6), 3, 0, ':'), 6, 0, ':')) AS run_time_value) AS rv
+    CROSS APPLY (SELECT DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS time), rv.run_time_value), CAST(rv.run_date_value AS datetime)) AS start_time) AS ca
     WHERE h.step_id > 0 AND h.run_date >= 19000101
+      AND rv.run_date_value IS NOT NULL
+      AND rv.run_time_value IS NOT NULL
+      AND ca.start_time < CONVERT(datetime, '$historyEndLiteral', 126)
+      AND DATEADD(SECOND, (h.run_duration / 10000) * 3600
+        + ((h.run_duration % 10000) / 100) * 60
+        + (h.run_duration % 100), ca.start_time) >= CONVERT(datetime, '$historyStartLiteral', 126)
 )
 SELECT e.execution_id, e.folder_name, e.project_name, e.package_name,
        e.start_time AS ssis_start_time, e.end_time AS ssis_end_time,
