@@ -231,3 +231,157 @@ Tambahkan bila mode optional aktif:
 
 Jangan menyimpulkan root cause, bottleneck component, rows/sec, query/index
 issue, blocking, wait, atau database cause jika evidence terkait belum ada.
+
+## 9. Buat report active job / anti-pattern
+
+Setelah collection selesai dan file input tervalidasi, buat report menggunakan
+`build_active_job_antipattern_report.ps1`. Script ini membaca assessment secara
+langsung dan menggunakan exact `Execution ID` yang ditemukan di SQL Agent
+history message.
+
+Jalankan dari root repository:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_active_job_antipattern_report.ps1 `
+  -AssessmentPath .\assessments\EVSET-90D-COMPLETE `
+  -OutputPath .\results `
+  -ReportSuffix EVSET-90D-COMPLETE
+```
+
+Untuk assessment ini:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_active_job_antipattern_report.ps1 `
+  -AssessmentPath .\assessments\EVSET-45D-COMPLETE `
+  -OutputPath .\results `
+  -ReportSuffix EVSET-45D-COMPLETE
+```
+
+Input assessment yang digunakan:
+
+```text
+06_additional_evidence\sql_agent\02_sql_agent_job_history.csv
+06_additional_evidence\sql_agent\01_sql_agent_job_steps.csv
+03_runtime\executions.csv
+01_static_packages\package_static_summary.csv
+```
+
+Script juga tetap mendukung mode legacy tanpa `-AssessmentPath`; mode tersebut
+membaca file manual dari `queries\` dan `DTSX_ANTIPATTERN_PACKAGE_FINDINGS.csv`.
+
+Output report:
+
+```text
+results\ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY_<AssessmentId>.md
+results\ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY_<AssessmentId>.csv
+```
+
+Validasi output:
+
+```powershell
+$reportCsv = '.\results\ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY_EVSET-45D-COMPLETE.csv'
+$rows = @(Import-Csv $reportCsv)
+"Rows=$($rows.Count)"
+"Columns=$($rows[0].PSObject.Properties.Count)"
+$rows | Select-Object -First 10 job_name,step_name,package_name,
+  execution_count,priority_level,priority_basis | Format-Table -AutoSize
+```
+
+Report hanya menyertakan SQL Agent job aktif dan mapping dengan exact `Execution
+ID`. Mapping yang hanya berdasarkan time overlap tidak dimasukkan. Jika static
+source hanya `package_static_summary.csv`, kolom anti-pattern yang tidak tersedia
+akan kosong. `Sort`, `Lookup`, `Merge`, `Aggregate`, dan `Script` tetap merupakan
+static indicator/investigation clue, bukan bukti bottleneck runtime.
+
+## 10. Membuat report anti-pattern dan runtime-heavy
+
+Setelah assessment memiliki static extraction dan runtime summary, jalankan scanner
+standalone berikut. `-ReportSuffix` menjaga output assessment baru tetap terpisah dari
+file report lama.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Upgrade-DTSXAntiPatternScan.ps1 `
+  -AssessmentPath .\assessments\EVSET-45D-COMPLETE `
+  -OutputPath .\results `
+  -GuidePath .\results\SSIS_Tuning_Guide.md `
+  -ReportSuffix EVSET-45D-COMPLETE
+
+powershell -ExecutionPolicy Bypass -File .\Repair-DestinationCommitFindings.ps1 `
+  -AssessmentPath .\assessments\EVSET-45D-COMPLETE `
+  -OutputPath .\results `
+  -ReportSuffix EVSET-45D-COMPLETE
+```
+
+Output:
+
+```text
+results\DTSX_ANTIPATTERN_PACKAGE_FINDINGS_EVSET-45D-COMPLETE.csv
+results\DTSX_ANTIPATTERN_INSPECTION_REPORT_EVSET-45D-COMPLETE.md
+results\RUNTIME_HEAVY_WITHOUT_ANTIPATTERN_EVSET-45D-COMPLETE.csv
+```
+
+Scanner menggunakan `01_static_packages\package_static_summary.csv` assessment
+sebagai inventory/indikator komponen dan melakukan scan SQL text DTSX untuk
+indikator `SELECT *`, sehingga tidak membutuhkan baseline
+`DTSX_ANTIPATTERN_PACKAGE_FINDINGS.csv` lama dan tidak mengubah file findings lama.
+`RUNTIME_HEAVY_WITHOUT_ANTIPATTERN.csv` berisi package dengan average runtime minimal
+600 detik tanpa indikator statis pada output assessment tersebut. Hasil ini adalah
+daftar investigasi, bukan bukti bahwa anti-pattern menyebabkan durasi runtime.
+
+## 11. Korelasi opsional untuk mapping mismatch
+
+Jika report memiliki `*_MAPPING_MISMATCH.csv`, jalankan mode kandidat berikut:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_active_job_antipattern_report.ps1 `
+  -AssessmentPath .\assessments\EVSET-45D-COMPLETE `
+  -OutputPath .\results `
+  -ReportSuffix EVSET-45D-COMPLETE-V7 `
+  -IncludeCommandTimeCandidates `
+  -CandidateToleranceSeconds 60
+```
+
+Mode ini mencocokkan package pada SQL Agent command dengan folder/project/package dan
+overlap waktu pada `executions.csv`. Hasilnya ditulis ke
+`ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY_<suffix>_COMMAND_TIME_CANDIDATES.csv` dengan
+confidence `COMMAND_TIME_CANDIDATE` jika hanya ada satu kandidat, atau
+`AMBIGUOUS_TIME_OVERLAP` jika lebih dari satu. Kandidat tidak digabung ke report exact
+dan tidak boleh dipakai sebagai bukti `Execution ID` tanpa verifikasi tambahan. Kedua
+file tambahan juga memuat `anti_pattern_count` dan `anti_pattern_fields` berdasarkan
+static findings package pada assessment, sehingga status anti-pattern dapat diperiksa
+langsung untuk setiap mismatch/candidate. Output juga memuat `job_step_start_time`,
+`job_step_end_time`, `job_step_duration_sec`, `priority_level`,
+`priority_confidence=PROVISIONAL_JOB_STEP`, dan `priority_basis`. P level ini berasal
+dari durasi SQL Agent, bukan durasi SSISDB exact, sehingga harus diperlakukan sebagai
+prioritas sementara.
+Report findings dan active-job juga memuat `anti_pattern_components`; nama component
+ditulis dalam satu kolom dan dipisahkan dengan semicolon (`;`).
+
+## 12. Membuat aggregate report per DTSX
+
+Setelah report V8/V7 tersedia, buat report gabungan berikut:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_dtsx_aggregate_report.ps1 `
+  -ReportPath .\results `
+  -OutputPath .\results `
+  -ReportSuffix EVSET-45D-COMPLETE-V8
+```
+
+Output:
+
+```text
+results\DTSX_AGGREGATE_REPORT_EVSET-45D-COMPLETE-V8.csv
+```
+
+Report menggabungkan exact mapping, mapping mismatch, dan command-time candidates.
+Agregasi dilakukan unik per `Lokasi File` DTSX. Jika satu DTSX muncul pada beberapa
+job/step, baris dengan `Duration` tertinggi dipilih beserta module dan tipe pipeline-nya.
+`Duration` adalah rata-rata durasi yang tersedia dari sumber masing-masing;
+untuk mismatch/candidate digunakan durasi SQL Agent step dan priority bersifat provisional.
+Kategori pada aggregate menormalkan nama field exact dan nama field supplemental,
+misalnya `FuzzyLookup` menjadi `anti-fuzzy-lookup`.
+
+Jika file output dengan nama yang sama sedang terbuka atau terkunci, gunakan
+suffix baru, misalnya `EVSET-45D-COMPLETE-V2`. Jangan menimpa report dari
+assessment lain.
