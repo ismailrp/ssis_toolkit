@@ -1,5 +1,7 @@
 # Generated SSIS assessment output
 assessments/*
+/ispac/
+/results/
 !assessments/.gitkeep
 
 # Local configuration and secrets
