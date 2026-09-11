@@ -89,6 +89,23 @@ function Get-EvidenceSolutions([string]$category) {
     if ($actions.Count -eq 0) { [void]$actions.Add('Lokalisasi waktu ke executable/component atau source query sebelum memilih perubahan teknis.') }
     return ($actions -join "`v")
 }
+function Get-PlanningTarget([string]$priority,[double]$durationSeconds,[string]$category) {
+    if ($priority -ne 'P1' -or $durationSeconds -le 0 -or $category -match '(?i)evidence_mapping_gap|runtime_hotspot_without_static_explanation') { return '' }
+    $minimumPercent = 10
+    $targetPercent = 20
+    $stretchPercent = 30
+    $targetSeconds = $durationSeconds * (1 - ($targetPercent / 100))
+    $savingSeconds = $durationSeconds - $targetSeconds
+    return ('Target optimasi sementara (planning estimate; bukan jaminan hasil)' + "`v" +
+        ('- Baseline observed: {0:N2} detik ({1:N2} menit) per execution.' -f $durationSeconds,($durationSeconds / 60)) + "`v" +
+        ('- Target utama client: {0}% reduction; target durasi <= {1:N2} detik ({2:N2} menit).' -f $targetPercent,$targetSeconds,($targetSeconds / 60)) + "`v" +
+        ('- Estimasi penghematan pada target: {0:N2} detik ({1:N2} menit) per execution.' -f $savingSeconds,($savingSeconds / 60)) + "`v" +
+        ('- Minimum acceptance: {0}% reduction; stretch target: {1}% reduction.' -f $minimumPercent,$stretchPercent) + "`v" +
+        '- Confidence: LOW / POSSIBLE sampai component elapsed, row volume, query plan, dan comparable benchmark tersedia.' + "`v" +
+        '- Validation: minimal 3 execution comparable dengan parameter, volume data, dan workload window yang setara.' + "`v" +
+        '- Success/guardrail: row count, nilai agregat, output downstream, dan success rate tidak memburuk.' + "`v" +
+        ('- Rollback/reject: correctness berubah atau median improvement kurang dari {0}%.' -f $minimumPercent))
+}
 function Set-Cell([object]$table, [int]$row, [int]$column, [string]$text) {
     $table.Cell($row, $column).Range.Text = $text
 }
@@ -118,6 +135,8 @@ try {
         $evidenceSolutions = Get-EvidenceSolutions $category
         $priority = [string]$row.'Priority Level'
         $durationSeconds = [double]$row.Duration
+        $planningTarget = Get-PlanningTarget $priority $durationSeconds $category
+        if (![string]::IsNullOrWhiteSpace($planningTarget)) { $evidenceSolutions += ("`v`v" + $planningTarget) }
         $durationText = if ($durationSeconds -ge 60) { '{0:N2} menit ({1:N2} detik)' -f ($durationSeconds / 60), $durationSeconds } else { '{0:N2} detik' -f $durationSeconds }
         $location = ([string]$row.'Lokasi File').Replace('/', '\')
         $pipeline = [string]$row.'Tipe Pipeline'
@@ -142,7 +161,7 @@ try {
             Remove-DocumentParagraph $document 'dsds'
             Remove-DocumentParagraph $document 'Eliminasi Cartesian CROSS JOIN CTE:'
             Remove-DocumentParagraph $document 'Ganti CTE perkalian kartesian dengan tabel referensi master kombinasi yang sudah dimaterialisasi atau lakukan query langsung berbasis transaksi aktual yang ada (Sparse Join alih-alih Dense Matrix Generation).'
-            Set-DocumentText $document 'Materialisasi Menggunakan #Temp Table Berindeks via Stored Procedure:' 'Rekomendasi berdasarkan evidence classification'
+            Set-DocumentText $document 'Materialisasi Menggunakan #Temp Table Berindeks via Stored Procedure:' 'Rekomendasi, validasi, dan target berdasarkan evidence classification'
             Set-DocumentText $document 'Pisahkan proses UNPIVOT ke dalam #Temp_Budget dengan CLUSTERED INDEX (TAHUN, UNIT_CODE, DIV_CODE, BULAN) .' $evidenceSolutions
             Remove-DocumentParagraph $document 'Pra-Kalkulasi SDBI (Cumulative Sum):'
             Remove-DocumentParagraph $document 'Pindahkan kalkulasi kumulatif bulanan (Year-to-Date / SDBI) ke batch proses SQL staging terpisah sebelum ditarik oleh SSIS.'

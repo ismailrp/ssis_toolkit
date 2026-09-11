@@ -23,6 +23,23 @@ function Get-Attr([Xml.XmlNode]$node,[string]$name){if(!$node -or !$node.Attribu
 function Get-Prop([Xml.XmlNode]$node,[string]$name){foreach($p in $node.SelectNodes(".//*[local-name()='property']")){if((Get-Attr $p 'name') -eq $name){return [string]$p.InnerText}};return ''}
 function Test-True([string]$value){return $value -match '^(?i:true|1|-1)$'}
 function Add-Detail([Collections.Generic.List[string]]$items,[string]$rule,[string]$name){if($name){[void]$items.Add(('{0}:{1}' -f $rule,($name-replace';',',')))}}
+function Add-SqlDetails([Collections.Generic.List[string]]$items,[string]$name,[string]$sql){
+    if([string]::IsNullOrWhiteSpace($name)-or[string]::IsNullOrWhiteSpace($sql)){return}
+    $rules=[ordered]@{
+        'SELECT*'='\bSELECT\s+(?:TOP\s*\([^)]*\)\s+)?\*\s+FROM\b'
+        CartesianCrossJoin='\bCROSS\s+JOIN\b'
+        ImplicitCartesianJoin='\bFROM\s+[\[\]\w.]+(?:\s+\w+)?\s*,\s*[\[\]\w.]+'
+        NonSargableFunctionPredicate='\b(?:WHERE|ON|AND|OR)\s+(?:\(+\s*)?(?:YEAR|MONTH|DAY|UPPER|LOWER|LEFT|RIGHT|CAST|CONVERT|ISNULL|COALESCE|RTRIM|LTRIM|SUBSTRING|DATEPART|FORMAT)\s*\('
+        OnTheFlyFunctionExpression='\b(?:SUBSTRING|DATEADD|DATEDIFF|CONCAT|CAST|CONVERT|RTRIM|LTRIM|ISNULL|COALESCE|FORMAT)\s*\('
+        NestedViewReference='\b(?:FROM|JOIN)\s+(?:\[[^]]+\]\.)?\[?(?:vw_|view_)[A-Za-z0-9_]+\]?'
+        PivotWindowFunction='\b(?:PIVOT|UNPIVOT)\b|\bOVER\s*\('
+        SqlUnionDistinct='\bUNION\b(?!\s+ALL\b)'
+        SqlUnionAll='\bUNION\s+ALL\b'
+        NoLockAdvisory='\bNOLOCK\b'
+        FullReloadIndicator='\bTRUNCATE\s+TABLE\b|\bDELETE\s+FROM\b'
+    }
+    foreach($rule in $rules.Keys){if((Count-Match $sql $rules[$rule])-gt 0){Add-Detail $items $rule $name}}
+}
 function Get-SqlText([xml]$xml){
     $parts=New-Object 'System.Collections.Generic.List[string]'
     foreach($p in $xml.SelectNodes("//*[local-name()='property']")){$n=Get-Attr $p 'name';$v=[string]$p.InnerText;if($n-match'(?i)^(SqlCommand|SqlStatementSource|CommandText|OpenRowset)$'-and$v-match'(?i)\b(SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC(?:UTE)?)\b'){[void]$parts.Add($v)}}
@@ -39,6 +56,9 @@ function Get-Scan([string]$path,[object]$summary){
         if($rule){Add-Detail $items $rule $name}
         if($class-match'(?i)OLEDBDestination'){$access=Get-Prop $c 'AccessMode';if($access-ne'3'-and$access-ne'4'){$m.FastLoadInactive++;Add-Detail $items 'FastLoadInactive' $name}else{$options=Get-Prop $c 'FastLoadOptions';if($options-notmatch'(?i)(^|,)\s*TABLOCK\s*(,|$)'){$m.NoTABLOCK++;Add-Detail $items 'NoTABLOCK' $name};$commit=Get-Prop $c 'FastLoadMaxInsertCommitSize';$v=0L;if([int64]::TryParse($commit,[ref]$v)-and$v-gt 0-and$v-lt 100000){$m.DestinationCommitSizeSetting++;Add-Detail $items 'DestinationCommitSizeSetting' $name}}}
         $validate=Get-Prop $c 'ValidateExternalMetadata';if($validate-ne''-and(Test-True $validate)){$m.ValidateExternalMetadataEnabled++}
+        $componentSql=New-Object 'System.Collections.Generic.List[string]'
+        foreach($p in $c.SelectNodes(".//*[local-name()='property']")){$propertyName=Get-Attr $p 'name';$value=[string]$p.InnerText;if($propertyName-match'(?i)^(SqlCommand|SqlStatementSource|CommandText)$'-and$value-match'(?i)\b(SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE|EXEC(?:UTE)?)\b'){[void]$componentSql.Add($value)}}
+        Add-SqlDetails $items $name ($componentSql-join"`n")
     }
     $sql=Get-SqlText $xml
     $m.'SELECT*'=Count-Match $sql '\bSELECT\s+(?:TOP\s*\([^)]*\)\s+)?\*\s+FROM\b';$m.CartesianCrossJoin=Count-Match $sql '\bCROSS\s+JOIN\b';$m.ImplicitCartesianJoin=Count-Match $sql '\bFROM\s+[\[\]\w.]+(?:\s+\w+)?\s*,\s*[\[\]\w.]+';$m.NonSargableFunctionPredicate=Count-Match $sql '\b(?:WHERE|ON|AND|OR)\s+(?:\(+\s*)?(?:YEAR|MONTH|DAY|UPPER|LOWER|LEFT|RIGHT|CAST|CONVERT|ISNULL|COALESCE|RTRIM|LTRIM|SUBSTRING|DATEPART|FORMAT)\s*\(';$m.OnTheFlyFunctionExpression=Count-Match $sql '\b(?:SUBSTRING|DATEADD|DATEDIFF|CONCAT|CAST|CONVERT|RTRIM|LTRIM|ISNULL|COALESCE|FORMAT)\s*\(';$m.NestedViewReference=Count-Match $sql '\b(?:FROM|JOIN)\s+(?:\[[^]]+\]\.)?\[?(?:vw_|view_)[A-Za-z0-9_]+\]?';$m.PivotWindowFunction=Count-Match $sql '\b(?:PIVOT|UNPIVOT)\b|\bOVER\s*\(';$m.SqlUnionDistinct=Count-Match $sql '\bUNION\b(?!\s+ALL\b)';$m.SqlUnionAll=Count-Match $sql '\bUNION\s+ALL\b';$m.NoLockAdvisory=Count-Match $sql '\bNOLOCK\b';$m.FullReloadIndicator=Count-Match $sql '\bTRUNCATE\s+TABLE\b|\bDELETE\s+FROM\b'
