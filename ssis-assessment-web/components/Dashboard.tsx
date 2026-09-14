@@ -74,7 +74,7 @@ export default function Dashboard() {
           <a href="#visuals">Visual analysis</a>
           <a href="#statistics">Package statistics</a>
           <a href="#findings">Priority findings</a>
-          <a href="#coverage">Evidence coverage</a>
+          <a href="#coverage">Cakupan analisis</a>
           <a href="#baseline">Package baseline</a>
           <a href="#roadmap">Finding documents</a>
           <a className="rail-feature-link" href="/findings">
@@ -328,7 +328,7 @@ export default function Dashboard() {
           <section className="report-section">
             <div className="section-title">
               <div>
-                <span className="section-no">02</span>
+                <span className="section-no">03</span>
                 <div>
                   <span className="kicker">PRIORITIZED REGISTER</span>
                   <h2>Evidence-backed findings</h2>
@@ -383,36 +383,36 @@ export default function Dashboard() {
           {config.showEvidence && (
             <section className="evidence report-section">
               <div>
-                <span className="section-no light">03</span>
-                <span className="kicker light">EVIDENCE COVERAGE</span>
-                <h2>What we know—and what we don’t.</h2>
+                <span className="section-no light">04</span>
+                <span className="kicker light">CAKUPAN ANALISIS</span>
+                <h2>Apa yang sudah dapat dinilai?</h2>
                 <p>
-                  Confidence depends on preserving the boundary between observed
-                  facts and untested mechanisms.
+                  Data saat ini cukup untuk menentukan prioritas, tetapi belum cukup
+                  untuk memastikan penyebab teknis dan solusi akhir.
                 </p>
               </div>
               <div className="evidence-grid">
                 <div>
                   <i className="fa-solid fa-circle-check" />
-                  <b>Runtime baseline</b>
-                  <span>16.480 executions · MaxExecutions=0</span>
+                  <b>Riwayat proses tersedia</b>
+                  <span>16.480 proses selama periode penilaian tanpa pembatasan jumlah</span>
                 </div>
                 <div>
                   <i className="fa-solid fa-circle-check" />
-                  <b>Static inventory</b>
+                  <b>Desain package berhasil diperiksa</b>
                   <span>
-                    {assessment.packagesScanned} packages · 0 parse errors
+                    {assessment.packagesScanned} package terbaca tanpa kegagalan pemeriksaan
                   </span>
                 </div>
                 <div className="gap">
                   <i className="fa-solid fa-circle-exclamation" />
-                  <b>Component telemetry</b>
-                  <span>Phase and row statistics unavailable</span>
+                  <b>Detail proses internal belum tersedia</b>
+                  <span>Bagian yang paling lambat di dalam aliran data masih perlu diukur</span>
                 </div>
                 <div className="gap">
                   <i className="fa-solid fa-circle-exclamation" />
-                  <b>SQL evidence</b>
-                  <span>Query Store disabled; plan/waits unknown</span>
+                  <b>Detail pemrosesan database belum tersedia</b>
+                  <span>Penyebab dari sisi query atau database belum dapat dipastikan</span>
                 </div>
               </div>
             </section>
@@ -421,10 +421,10 @@ export default function Dashboard() {
           <section className="report-section">
             <div className="section-title">
               <div>
-                <span className="section-no">04</span>
+                <span className="section-no">05</span>
                 <div>
                   <span className="kicker">PACKAGE BASELINE</span>
-                  <h2>Observed duration leaders</h2>
+                  <h2>Top 10 by average duration</h2>
                 </div>
               </div>
             </div>
@@ -432,7 +432,7 @@ export default function Dashboard() {
               <table>
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th>Rank by avg</th>
                     <th>Package / project</th>
                     <th>Avg duration</th>
                     <th>Max duration</th>
@@ -451,7 +451,7 @@ export default function Dashboard() {
                       <td>{duration(x.max)}</td>
                       <td>
                         <span className="status-dot" />
-                        Investigation target
+                        {x.max > 30000 ? "Average rank · max outlier" : "Average-duration rank"}
                       </td>
                     </tr>
                   ))}
@@ -463,7 +463,7 @@ export default function Dashboard() {
           {config.showRoadmap && (
             <section id="roadmap" className="detail-bridge report-section">
               <div className="detail-bridge-copy">
-                <span className="section-no light">05</span>
+                <span className="section-no light">06</span>
                 <span className="kicker light">
                   ASSESSMENT TO PACKAGE DETAIL
                 </span>
@@ -583,7 +583,7 @@ export default function Dashboard() {
                 checked={config.showEvidence}
                 onChange={(e) => update({ showEvidence: e.target.checked })}
               />
-              <span>Show evidence coverage</span>
+              <span>Tampilkan cakupan analisis</span>
             </label>
             <label className="toggle">
               <input
