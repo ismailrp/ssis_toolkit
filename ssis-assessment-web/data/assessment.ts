@@ -21,8 +21,26 @@ export const durationLeaders = [
   { package: "FACT_LKK.dtsx", project: "DWH_LKK_PROJECT_NEW", avg: 4680.51, max: 8676.63 },
   { package: "Seq_Staging_SIGAP.dtsx", project: "Sequence_Table", avg: 4625.37, max: 9161.68 },
   { package: "PS_AS.dtsx", project: "INVESTOR_RELATIONS_PROJECT", avg: 4156.12, max: 5168.33 },
-  { package: "Staging.dtsx", project: "AWL", avg: 3271.27, max: 7206.04 },
-  { package: "DAILY_TBS.dtsx", project: "DWH Operation", avg: 2784.4, max: 6241.8 },
+  { package: "Seq_BSEG 1.dtsx", project: "Sequence_Table", avg: 3790.50, max: 8783.25 },
+  { package: "STG to DWH.dtsx", project: "ControllableProfit", avg: 3498.64, max: 4440.09 },
+  { package: "Fact.dtsx", project: "DWH_GRADING_TBS", avg: 3141.53, max: 5819.23 },
+  { package: "DWH_SMALLERTABLES.dtsx", project: "SSISMR", avg: 3116.10, max: 117315.65 },
+  { package: "Seq_BSEG.dtsx", project: "Sequence_Table", avg: 3104.66, max: 3477.71 },
+  { package: "FACT_PPH_ANNUAL_SPLIT.dtsx", project: "PPH21_DJP", avg: 2638.50, max: 5104.05 },
+  { package: "STG to DWH.dtsx", project: "LKK Phase 2", avg: 2292.05, max: 4175.17 },
+];
+
+export const cumulativeLeaders = [
+  { package: "Fact.dtsx", project: "DWH_GRADING_TBS", executions: 149, totalHours: 130.02 },
+  { package: "FACT_SPARTA_LHA_NEW.dtsx", project: "SPARTA_PROJECT", executions: 174, totalHours: 107.73 },
+  { package: "DWH_STG to DWH_DM.dtsx", project: "premi dan lembur monitoring", executions: 196, totalHours: 100.52 },
+  { package: "Staging.dtsx", project: "AWL", executions: 1076, totalHours: 77.35 },
+  { package: "FACT_DD_TBS.dtsx", project: "DAILY_DASHBOARD_PROJECT", executions: 260, totalHours: 61.72 },
+  { package: "Seq_Staging_SIGAP.dtsx", project: "Sequence_Table", executions: 47, totalHours: 60.39 },
+  { package: "FACT_LKK.dtsx", project: "DWH_LKK_PROJECT_NEW", executions: 44, totalHours: 57.21 },
+  { package: "Seq_Staging_SAP.dtsx", project: "Sequence_Table", executions: 89, totalHours: 49.81 },
+  { package: "PS_AS.dtsx", project: "INVESTOR_RELATIONS_PROJECT", executions: 43, totalHours: 49.64 },
+  { package: "Seq_Staging_SPARTA_4T.dtsx", project: "Sequence_Table", executions: 179, totalHours: 49.06 },
 ];
 
 export const findings = [

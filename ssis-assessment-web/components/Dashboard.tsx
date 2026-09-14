@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
 import { assessment, durationLeaders, findings } from "@/data/assessment";
-import { DurationChart, ReliabilityChart } from "./Charts";
+import {
+  AverageDurationChart,
+  CumulativeRuntimeChart,
+  ReliabilityChart,
+} from "./Charts";
 
 type Config = {
   client: string;
@@ -144,7 +148,10 @@ export default function Dashboard() {
           <section className="intro report-section">
             <div>
               <span className="section-no">01</span>
-              <h2>Executive perspective</h2>
+              <div>
+                <span className="kicker">EXECUTIVE OVERVIEW</span>
+                <h2>Executive perspective</h2>
+              </div>
             </div>
             <div>
               <p className="lead">
@@ -263,17 +270,50 @@ export default function Dashboard() {
           </section>
 
           <section className="chart-grid report-section">
-            <article className="panel">
+            <article className="panel chart-wide">
               <div className="panel-head">
                 <div>
-                  <span className="kicker">RUNTIME PROFILE</span>
-                  <h3>Longest average runtime</h3>
+                  <span className="kicker">RUNTIME PROFILE · AVERAGE</span>
+                  <h3>Top 10 average package duration</h3>
+                  <p className="chart-note">
+                    Diurutkan berdasarkan avg_duration_sec pada seluruh package
+                    summary. Maximum duration dipisahkan agar outlier tidak
+                    merusak skala average.
+                  </p>
                 </div>
-                <span className="badge">Top 5</span>
+                <span className="badge">Top 10</span>
               </div>
-              <DurationChart accent={config.accent} />
+              <AverageDurationChart accent={config.accent} />
+              <div className="outlier-note">
+                <i className="fa-solid fa-wave-square" />
+                <div>
+                  <b>Observed outlier</b>
+                  <p>
+                    <code>DWH_SMALLERTABLES.dtsx</code> mencapai maksimum
+                    117.315,65 detik (32,59 jam), sedangkan average-nya 3.116,10
+                    detik. Nilai maksimum tetap tersedia pada tabel baseline dan
+                    harus dianalisis sebagai observed execution, bukan dianggap
+                    typical runtime.
+                  </p>
+                </div>
+              </div>
             </article>
-            <article className="panel">
+            <article className="panel chart-wide">
+              <div className="panel-head">
+                <div>
+                  <span className="kicker">RUNTIME PROFILE · CUMULATIVE</span>
+                  <h3>Top 10 cumulative runtime consumers</h3>
+                  <p className="chart-note">
+                    Derived cumulative hours = avg_duration_sec × executions.
+                    Metric ini menunjukkan workload impact, bukan typical
+                    latency.
+                  </p>
+                </div>
+                <span className="badge">Top 10</span>
+              </div>
+              <CumulativeRuntimeChart accent={config.accent} />
+            </article>
+            {/* <article className="panel chart-reliability">
               <div className="panel-head">
                 <div>
                   <span className="kicker">RELIABILITY</span>
@@ -282,7 +322,7 @@ export default function Dashboard() {
                 <span className="badge warning">1,68% non-success</span>
               </div>
               <ReliabilityChart accent={config.accent} />
-            </article>
+            </article> */}
           </section>
 
           <section className="report-section">
@@ -401,7 +441,7 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {durationLeaders.map((x, i) => (
-                    <tr key={x.package}>
+                    <tr key={`${x.project}|${x.package}`}>
                       <td>{String(i + 1).padStart(2, "0")}</td>
                       <td>
                         <strong>{x.package}</strong>

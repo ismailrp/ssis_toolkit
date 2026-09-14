@@ -32,13 +32,13 @@ footer { display:flex; justify-content:space-between; color:#8c918f; font-size:9
 
 /* SSIS visual system: follows the SSAS assessment layout language, with a distinct violet/black identity. */
 :root { --ink:#17151d; --muted:#706b79; --paper:#f7f5fa; --line:#e4dfea; --accent:#7150c8; --violet-dark:#251b3d; --violet-black:#100d16; --violet-light:#a98ce8; --orange:#c7a9ff; --shadow:0 22px 60px rgba(29,20,47,.12); }
-.report-shell { margin-left:210px; max-width:1480px; }
-.rail { position:fixed; inset:0 auto 0 0; width:210px; padding:28px 22px; background:var(--violet-black); color:#eee9f8; display:flex; flex-direction:column; z-index:20; }
+.report-shell { margin-left:230px; max-width:1480px; }
+.rail { position:fixed; inset:0 auto 0 0; width:230px; padding:28px 22px; background:var(--violet-black); color:#eee9f8; display:flex; flex-direction:column; z-index:20; }
 .rail-brand { display:flex; gap:12px; align-items:center; margin-bottom:42px; color:inherit; text-decoration:none; }
 .rail-brand>span { width:42px; height:42px; border:1px solid #77669a; display:grid; place-items:center; font:800 14px Georgia,serif; color:#fff; }
 .rail-brand b { font-size:13px; line-height:1.15; letter-spacing:.02em; }
-.rail nav { display:flex; flex-direction:column; gap:8px; }
-.rail nav a { padding:9px 10px; border-left:2px solid transparent; color:#aaa0bd; font-size:12px; text-decoration:none; transition:.2s; }
+.rail nav { display:flex; flex-direction:column; align-items:stretch; gap:6px; width:100%; }
+.rail nav a { display:flex; align-items:center; width:100%; min-height:36px; padding:8px 10px; border-left:2px solid transparent; color:#aaa0bd; font-size:12px; line-height:1.35; text-decoration:none; transition:.2s; }
 .rail nav a:hover { border-color:var(--violet-light); color:#fff; background:#251d31; }
 .rail-foot { margin-top:auto; display:flex; align-items:center; gap:8px; color:#948aa8; font-size:11px; }
 .live-dot { width:7px; height:7px; border-radius:50%; background:#a98ce8; box-shadow:0 0 0 4px rgba(169,140,232,.12); }
@@ -89,3 +89,10 @@ body{font-family:var(--font-body),Arial,sans-serif}
 .stats-section{margin:0 0 64px}.stats-table-wrap{background:#fff;border:1px solid var(--line)}.stats-table{width:100%;border-collapse:collapse}.stats-table th{background:#17121f;color:#cfc5dc;padding:13px 18px;font-size:9px;letter-spacing:.1em;text-transform:uppercase}.stats-table th:nth-child(2){text-align:right}.stats-table td{padding:14px 18px;border-bottom:1px solid var(--line);font-size:11px}.stats-table td:nth-child(2){width:100px;text-align:right}.stats-table td:nth-child(2) b{font:800 22px var(--font-display);color:var(--accent)}.stats-table td:last-child{color:var(--muted)}.stats-highlight{background:#f0ebfa}.population-note{display:flex;gap:13px;background:#eeeaf3;border-left:4px solid var(--accent);padding:16px 19px;margin-top:13px}.population-note i{color:var(--accent);margin-top:2px}.population-note p{font-size:11px;line-height:1.55;margin:0;color:var(--muted)}.population-note b{color:var(--ink)}
 #findings .section-no,#coverage .section-no,#baseline .section-no,#roadmap .section-no{font-size:0}#findings .section-no:after,#coverage .section-no:after,#baseline .section-no:after,#roadmap .section-no:after{font-size:18px}#findings .section-no:after{content:"03"}#coverage .section-no:after{content:"04"}#baseline .section-no:after{content:"05"}#roadmap .section-no:after{content:"06"}
 @media print{.stats-section{margin-bottom:8mm}.stats-table td{padding:2.5mm 3mm;font-size:8pt}.stats-table td:nth-child(2) b{font-size:14pt}.population-note{padding:3mm}}
+
+.chart-wide{grid-column:1/-1}.chart-note{max-width:720px;color:var(--muted);font-size:10px;line-height:1.45;margin:5px 0 0}.chart-reliability{grid-column:1/-1;max-width:560px;width:100%;justify-self:center}
+.outlier-note{display:flex;gap:13px;align-items:flex-start;background:#f0ebfa;border-left:4px solid var(--accent);padding:14px 17px;margin-top:5px}.outlier-note i{color:var(--accent);margin-top:2px}.outlier-note b{font-size:9px;letter-spacing:.1em;text-transform:uppercase}.outlier-note p{color:var(--muted);font-size:10px;line-height:1.5;margin:4px 0}.outlier-note code{color:var(--ink);font-weight:700}
+@media print{.chart-note{font-size:7pt}.chart-reliability{max-width:120mm}.chart-wide{grid-column:1/-1}}
+
+/* Keep the featured findings link aligned with the primary sidebar menu. */
+.rail nav .rail-feature-link{margin-top:14px!important;border:0!important;border-left:2px solid #6f55a0!important;background:#21192c;color:#d9c9f5!important}
