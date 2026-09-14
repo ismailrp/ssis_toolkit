@@ -43,11 +43,46 @@ export const cumulativeLeaders = [
   { package: "Seq_Staging_SPARTA_4T.dtsx", project: "Sequence_Table", executions: 179, totalHours: 49.06 },
 ];
 
+// Static design indicators from the V12 scanner. `canonicalPackages` counts the
+// 167 unique package locations in the aggregate finding report, while
+// `scanPackages` and `occurrences` retain the full 781-package static scope.
+export const staticFindingStatistics = [
+  { category: "Full reload indicator", canonicalPackages: 145, scanPackages: 624, occurrences: 2465 },
+  { category: "On-the-fly function expression", canonicalPackages: 111, scanPackages: 455, occurrences: 21907 },
+  { category: "Non-sargable function predicate", canonicalPackages: 79, scanPackages: 309, occurrences: 5007 },
+  { category: "SELECT *", canonicalPackages: 68, scanPackages: 249, occurrences: 2961 },
+  { category: "Union All", canonicalPackages: 66, scanPackages: 147, occurrences: 1939 },
+  { category: "Data conversion", canonicalPackages: 52, scanPackages: 290, occurrences: 1609 },
+  { category: "Pivot / window function", canonicalPackages: 43, scanPackages: 136, occurrences: 2498 },
+  { category: "Cartesian cross join", canonicalPackages: 36, scanPackages: 70, occurrences: 602 },
+  { category: "Sort", canonicalPackages: 33, scanPackages: 175, occurrences: 1222 },
+  { category: "Script component", canonicalPackages: 31, scanPackages: 212, occurrences: 2347 },
+  { category: "Merge Join component", canonicalPackages: 29, scanPackages: 173, occurrences: 710 },
+  { category: "Aggregate", canonicalPackages: 13, scanPackages: 93, occurrences: 319 },
+  { category: "NOLOCK advisory", canonicalPackages: 13, scanPackages: 29, occurrences: 702 },
+  { category: "Fast Load inactive", canonicalPackages: 12, scanPackages: 46, occurrences: 50 },
+  { category: "ADO.NET / ODBC provider", canonicalPackages: 6, scanPackages: 82, occurrences: 485 },
+  { category: "No TABLOCK", canonicalPackages: 5, scanPackages: 37, occurrences: 153 },
+  { category: "Execute Package Task", canonicalPackages: 3, scanPackages: 43, occurrences: 532 },
+  { category: "Nested view reference", canonicalPackages: 2, scanPackages: 32, occurrences: 66 },
+  { category: "Lookup partial / no cache", canonicalPackages: 0, scanPackages: 2, occurrences: 4 },
+  { category: "OLE DB Command", canonicalPackages: 0, scanPackages: 8, occurrences: 12 },
+];
+
+// Active-job report rows are job-step-package relationships before package
+// deduplication, sourced from ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY V12.
+export const activeJobPriorityDistribution = [
+  { priority: "P0", count: 0 },
+  { priority: "P1", count: 90 },
+  { priority: "P2", count: 1 },
+  { priority: "P3", count: 87 },
+];
+
 export const findings = [
-  { id: "SSIS-TUNE-001", priority: "P0", type: "VALIDATE FIRST", title: "Lengkapi observability runtime", scope: "Assessment-wide", evidence: "Component phase dan data statistics kosong; Query Store tidak aktif.", hypothesis: "Tanpa telemetry ini, mekanisme bottleneck pipeline dan database tidak dapat dibuktikan.", validation: "Capture component phase, row volume, query identity, duration, reads, waits, dan blocking pada execution comparable.", guardrail: "Tidak mengubah package atau konfigurasi produksi saat baseline belum lengkap.", confidence: "CONFIRMED" },
-  { id: "SSIS-TUNE-002", priority: "P1", type: "INVESTIGATE", title: "Profile Seq_Staging_SIGAP / Package4", scope: "Sequence_Table / Sequence_Table / Seq_Staging_SIGAP.dtsx", evidence: "Execution 1240550 berdurasi 6.336,348 detik; Package4 menyumbang 6.334,656 detik.", hypothesis: "Elapsed time terkonsentrasi pada branch Package4; mekanisme internal belum diketahui.", validation: "Trace dependency, child execution, source/destination timing, row volume, serta SQL aktif untuk Package4.", guardrail: "Output, row count, downstream behavior, dan success rate tidak memburuk.", confidence: "CONFIRMED LOCATION" },
-  { id: "SSIS-TUNE-003", priority: "P1", type: "INVESTIGATE", title: "Trace AWL API to STG", scope: "Project_Fact / AWL / Staging.dtsx / API to STG", evidence: "34 raw execution, total 11.122,319 detik, P95 720,6 detik; execution target 1240317.", hypothesis: "API latency, pagination, serialization, atau destination write dapat menjelaskan variability.", validation: "Pisahkan API call, transform, dan destination elapsed pada minimal tiga execution comparable.", guardrail: "Validasi completeness, duplicate handling, dan API retry semantics.", confidence: "HIGHLY LIKELY TARGET" },
-  { id: "SSIS-REL-001", priority: "P1", type: "TUNE NOW", title: "Pulihkan reliability koneksi dan validasi", scope: "DWH_GRADING_TBS/Staging; Seq_Staging_WB; Seq_Staging_NON_SAP", evidence: "Connection acquisition, validation, timeout, missing connection, dan failure messages ditemukan.", hypothesis: "Deployment/environment reference atau availability provider menyebabkan failure dan retry.", validation: "Perbaiki dalam controlled test dan bandingkan success rate; nilai performance secara terpisah.", guardrail: "Rollback bila target koneksi, credential mapping, atau hasil data berubah.", confidence: "CONFIRMED" },
+  { id: "SSIS-TUNE-001", priority: "P0", type: "VALIDASI DAHULU", title: "Lengkapi pengukuran runtime", scope: "Seluruh assessment", evidence: "Component phase dan data statistics kosong; Query Store tidak aktif.", hypothesis: "Tanpa data pengukuran tersebut, penyebab bottleneck pipeline dan database belum dapat dibuktikan.", validation: "Ambil component phase, volume baris, identitas query, durasi, reads, waits, dan blocking pada execution yang dapat dibandingkan.", guardrail: "Jangan mengubah package atau konfigurasi produksi sebelum baseline memadai.", rollback: "Hentikan pengumpulan atau kembalikan konfigurasi logging jika menambah overhead yang material pada proses.", confidence: "TERKONFIRMASI" },
+  { id: "SSIS-TUNE-002", priority: "P1", type: "INVESTIGASI", title: "Periksa Seq_Staging_SIGAP / Package4", scope: "Sequence_Table / Sequence_Table / Seq_Staging_SIGAP.dtsx", evidence: "Execution 1240550 berdurasi 6.336,348 detik; Package4 menyumbang 6.334,656 detik.", hypothesis: "Waktu proses terkonsentrasi pada Package4, tetapi mekanisme internalnya belum diketahui.", validation: "Telusuri dependency, child execution, waktu source/destination, volume baris, dan SQL aktif untuk Package4.", guardrail: "Output, jumlah baris, proses downstream, dan success rate tidak memburuk.", rollback: "Tolak atau batalkan perubahan jika hasil data berubah atau durasi tidak membaik pada execution pembanding.", confidence: "LOKASI WAKTU TERKONFIRMASI; PENYEBAB BELUM DIKETAHUI" },
+  { id: "SSIS-TUNE-003", priority: "P1", type: "INVESTIGASI", title: "Telusuri AWL API to STG", scope: "Project_Fact / AWL / Staging.dtsx / API to STG", evidence: "34 raw execution, total 11.122,319 detik, P95 720,6 detik; execution target 1240317.", hypothesis: "Waktu respons API, pagination, serialization, atau penulisan destination mungkin menjelaskan variasi durasi.", validation: "Pisahkan waktu API call, transformasi, dan destination pada minimal tiga execution yang dapat dibandingkan.", guardrail: "Pastikan kelengkapan data, penanganan duplikasi, dan mekanisme retry API tidak berubah.", rollback: "Batalkan perubahan jika data tidak lengkap, terjadi duplikasi, atau reliability API memburuk.", confidence: "TARGET SANGAT MUNGKIN; PENYEBAB BELUM TERBUKTI" },
+  { id: "SSIS-REL-001", priority: "P1", type: "PERBAIKI DALAM CONTROLLED TEST", title: "Pulihkan reliability koneksi dan validasi", scope: "DWH_GRADING_TBS/Staging; Seq_Staging_WB; Seq_Staging_NON_SAP", evidence: "Connection acquisition, validation, timeout, missing connection, dan failure messages ditemukan.", hypothesis: "Deployment/environment reference atau ketersediaan provider mungkin menyebabkan failure dan retry.", validation: "Perbaiki dalam controlled test dan bandingkan success rate; ukur dampak performance secara terpisah.", guardrail: "Target koneksi, credential mapping, output data, dan downstream behavior harus tetap benar.", rollback: "Kembalikan konfigurasi sebelumnya jika koneksi mengarah ke target yang salah atau hasil data berubah.", confidence: "KONDISI TERKONFIRMASI; MEKANISME PERLU DIVALIDASI" },
 ];
 
 export const roadmap = [

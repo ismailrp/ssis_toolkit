@@ -69,3 +69,57 @@ Ringkasnya:
 Karena itu, kita belum boleh menyatakan ada tepat 157 package hilang. Yang terbukti adalah terdapat 157 net difference
 dan 557 key mismatch records pada kedua sisi (357 + 200) yang perlu direkonsiliasi berdasarkan rename, snapshot,
 folder/project, serta kegagalan extraction.
+
+---
+
+• Angka 178 bukan jumlah package unik hasil static anti-pattern scan. Itu adalah jumlah baris kombinasi:
+
+SQL Agent job + step + SSIS package
+
+di results/ACTIVE_JOB_DTSX_ANTIPATTERN_PRIORITY_EVSET-45D-COMPLETE-V12.csv.
+
+Rinciannya:
+
+Tahap Jumlah
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ━━━━━━━━
+Seluruh package static yang dipindai 781
+──────────────────────────────────────── ────────
+Baris active-job/package exact mapping 178
+──────────────────────────────────────── ────────
+Package path unik dalam 178 baris 165
+──────────────────────────────────────── ────────
+Package tambahan dari mapping mismatch 2
+──────────────────────────────────────── ────────
+Hasil aggregate per lokasi DTSX unik 167
+
+Mengapa 178 menjadi 165 package unik? Karena package yang sama dapat dipanggil oleh beberapa job/step. Ada 13 baris
+duplikat setelah dikelompokkan berdasarkan lokasi DTSX:
+
+- CHECK_QUERY_DATA.dtsx: 10 baris → 1 package, mengurangi 9
+- DWH_ZVT_MSEGPF.dtsx: 2 → 1, mengurangi 1
+- DWH-COEP.dtsx: 2 → 1, mengurangi 1
+- FACT_CIVIL_ENGINEERING.dtsx: 2 → 1, mengurangi 1
+- FACT_DD_TBS.dtsx: 2 → 1, mengurangi 1
+
+Jadi:
+
+178 baris active-job
+
+- 13 duplikasi lokasi package
+  = 165 package unik
+
+Kemudian aggregate memasukkan dua package unik dari report mapping mismatch:
+
+- Project_Fact/MILL_COST_PROJECT/STG_FOR_DIM_MILL_COST.dtsx
+- Project_Fact/Segregation/Staging Segregation.dtsx
+
+Sehingga:
+
+165 package exact unik
+
+- 2 package mismatch unik
+  = 167 aggregate package
+
+Ini sesuai logika build_dtsx_aggregate_report.ps1:31, yang menggabungkan exact, mismatch, dan candidate lalu melakukan
+Group-Object Location. Jadi 167 adalah jumlah lokasi DTSX unik, sementara 178 adalah jumlah relasi job-step-package,
+bukan jumlah package unik. Kandidat command/time tidak menambah package unik baru.
